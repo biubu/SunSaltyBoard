@@ -58,7 +58,9 @@
       "Bash(rm -f index.html)",
       "Bash(cd:*)",
       "Bash(git tag:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
