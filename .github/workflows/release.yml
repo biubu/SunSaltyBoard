@@ -59,3 +59,4 @@ jobs:
           name: bundles-${{ matrix.platform }}
           path: |
             src-tauri/target/*/release/bundle/nsis/*.exe
+          overwrite: true
