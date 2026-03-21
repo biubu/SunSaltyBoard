@@ -2,6 +2,8 @@
 
 A minimalist floating clipboard manager for Windows.
 
+![SunSaltyBoard](./src-tauri/icons/128x128@2x%20.png)
+
 ## Features
 
 - Global hotkey (Ctrl+Shift+V) to show window near cursor
