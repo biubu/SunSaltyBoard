@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./store";
@@ -13,19 +13,19 @@ function App() {
     loadHistory();
     loadSettings();
 
-    const unlisten = listen<ClipboardItem>("clipboard-changed", (event) => {
+    const unlistenPromise = listen<ClipboardItem>("clipboard-changed", (event) => {
       console.log("Clipboard changed:", event.payload);
       loadHistory();
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenPromise.then((fn) => fn());
     };
-  }, [loadHistory, loadSettings]);
+  }, []); // Empty dependency array - loadHistory and loadSettings are stable
 
-  const hideWindow = async () => {
+  const hideWindow = useCallback(async () => {
     await invoke("hide_window");
-  };
+  }, []);
 
   return (
     <div className="h-screen text-text flex flex-col overflow-hidden" style={{ background: '#f3f4f6', overflow: 'hidden' }}>

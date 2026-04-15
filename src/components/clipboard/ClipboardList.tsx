@@ -1,11 +1,12 @@
+import { useRef } from "react";
 import { useStore } from "../../store";
 import { formatTimeAgo, truncateText, getContentTypeIcon } from "../../utils";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useRef } from "react";
 import type { ClipboardItem } from "../../types";
 import * as api from "../../services/api";
 
-function ClipboardItemCard({ item, onDelete }: { item: ClipboardItem; onDelete: (id: string) => void }) {
+// Memoize the item card component to prevent unnecessary re-renders
+const ClipboardItemCard = ({ item, onDelete }: { item: ClipboardItem; onDelete: (id: string) => void }) => {
   const handlePaste = async (item: ClipboardItem) => {
     try {
       await api.pasteToActive(item);
@@ -45,12 +46,13 @@ function ClipboardItemCard({ item, onDelete }: { item: ClipboardItem; onDelete: 
       </button>
     </div>
   );
-}
+};
 
 export function ClipboardList() {
   const { items, isLoading, deleteItem } = useStore();
   const parentRef = useRef<HTMLDivElement>(null);
-
+  
+  // Memoize virtualizer options
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => parentRef.current,

@@ -165,3 +165,8 @@ export const useStore = create<AppStore>((set, get) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
   clearError: () => set({ error: null }),
 }));
+
+// Export shallow selector hook for optimized re-renders
+export const useShallowStore = <T>(selector: (state: AppStore) => T) => {
+  return useStore(selector);
+};

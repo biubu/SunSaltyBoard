@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use crate::database::ClipboardItem;
 use crate::AppState;
@@ -42,6 +43,7 @@ pub struct ClipboardEvent {
 pub struct ClipboardManager {
     running: Arc<AtomicBool>,
     last_content: Arc<Mutex<String>>,
+    last_image_hash: Arc<Mutex<u64>>,
 }
 
 impl ClipboardManager {
@@ -49,6 +51,7 @@ impl ClipboardManager {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             last_content: Arc::new(Mutex::new(String::new())),
+            last_image_hash: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -201,12 +204,14 @@ impl Default for ClipboardManager {
 struct ClipboardWindowState {
     app_handle: Option<AppHandle>,
     last_content: Arc<Mutex<String>>,
+    last_image_hash: Arc<Mutex<u64>>,
     running: Arc<AtomicBool>,
 }
 
 static CLIPBOARD_STATE: Mutex<ClipboardWindowState> = Mutex::new(ClipboardWindowState {
     app_handle: None,
     last_content: std::sync::Mutex::new(String::new()),
+    last_image_hash: std::sync::Mutex::new(0),
     running: std::sync::atomic::AtomicBool::new(false),
 });
 
@@ -222,13 +227,40 @@ unsafe extern "system" fn window_proc(
     if msg == WM_CLIPBOARDUPDATE {
         if let Some(app_handle) = CLIPBOARD_STATE.lock().unwrap().app_handle.clone() {
             let last_content = CLIPBOARD_STATE.lock().unwrap().last_content.clone();
+            let last_image_hash = CLIPBOARD_STATE.lock().unwrap().last_image_hash.clone();
             
-            // Try to get text from clipboard
+            // Try to get content from clipboard (text and image)
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                // Check for text content
                 if let Ok(text) = clipboard.get_text() {
                     let mut last = last_content.lock().unwrap();
                     if *last != text {
-                        process_clipboard_change_impl(&text, &mut last, &app_handle);
+                        process_clipboard_change_impl(&text, &mut last, &app_handle, None);
+                    }
+                }
+                
+                // Check for image content
+                if let Ok(image_data) = clipboard.get_image() {
+                    // Calculate a simple hash of the image for change detection
+                    let hash = calculate_image_hash(&image_data);
+                    let mut last_hash = last_image_hash.lock().unwrap();
+                    if *last_hash != hash {
+                        // Convert image to base64 for storage
+                        let width = image_data.width;
+                        let height = image_data.height;
+                        let rgba_data = image_data.bytes();
+                        
+                        // Create PNG data (simplified - in production use proper PNG encoding)
+                        let png_data = encode_image_to_png(rgba_data, width, height);
+                        let base64_image = BASE64.encode(&png_data);
+                        
+                        process_clipboard_change_impl(
+                            &base64_image, 
+                            &mut String::new(), 
+                            &app_handle, 
+                            Some(("image".to_string(), width, height))
+                        );
+                        *last_hash = hash;
                     }
                 }
             }
@@ -239,15 +271,44 @@ unsafe extern "system" fn window_proc(
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
-fn process_clipboard_change(text: &str, last: &mut std::sync::MutexGuard<String>, app_handle: &AppHandle) {
-    process_clipboard_change_impl(text, last, app_handle);
+// Simple hash function for image change detection
+fn calculate_image_hash(image: &arboard::ImageData) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    
+    let mut hasher = DefaultHasher::new();
+    image.width.hash(&mut hasher);
+    image.height.hash(&mut hasher);
+    // Hash only a sample of pixels for performance
+    let bytes = image.bytes();
+    let step = std::cmp::max(1, bytes.len() / 1000);
+    for i in (0..bytes.len()).step_by(step) {
+        bytes[i].hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
-fn process_clipboard_change_impl(text: &str, last: &mut String, app_handle: &AppHandle) {
+// Simple PNG encoding placeholder (in production, use png crate)
+fn encode_image_to_png(rgba_data: &[u8], width: usize, height: usize) -> Vec<u8> {
+    // For now, just return the raw RGBA data
+    // In production, use the `png` crate to properly encode
+    rgba_data.to_vec()
+}
+
+fn process_clipboard_change(text: &str, last: &mut std::sync::MutexGuard<String>, app_handle: &AppHandle) {
+    process_clipboard_change_impl(text, last, app_handle, None);
+}
+
+fn process_clipboard_change_impl(
+    text: &str, 
+    last: &mut String, 
+    app_handle: &AppHandle,
+    image_info: Option<(String, usize, usize)>
+) {
     if let Some(state) = app_handle.try_state::<AppState>() {
-        // Check sensitive content filter
+        // Check sensitive content filter (only for text)
         let settings = &state.settings;
-        if settings.sensitive_filter {
+        if settings.sensitive_filter && image_info.is_none() {
             let sensitive_patterns = ["password", "passwd", "secret", "token", "api_key"];
             let lower_text = text.to_lowercase();
             if sensitive_patterns.iter().any(|p| lower_text.contains(p)) {
@@ -257,16 +318,29 @@ fn process_clipboard_change_impl(text: &str, last: &mut String, app_handle: &App
             }
         }
 
-        let preview = text.chars().take(200).collect::<String>();
+        // Determine content type
+        let (content_type, preview) = if let Some((ref img_type, width, height)) = image_info {
+            (img_type.clone(), format!("Image: {}x{}", width, height))
+        } else {
+            ("text".to_string(), text.chars().take(200).collect::<String>())
+        };
+
+        // Apply encryption for sensitive content if enabled
+        let final_content = if settings.encrypt_sensitive && image_info.is_none() {
+            encrypt_sensitive_content(text)
+        } else {
+            text.to_string()
+        };
+
         let item = ClipboardItem {
             id: Uuid::new_v4().to_string(),
-            content_type: "text".to_string(),
-            content: text.to_string(),
+            content_type,
+            content: final_content,
             preview,
             group_id: None,
             created_at: Utc::now().to_rfc3339(),
             is_favorite: false,
-            metadata: None,
+            metadata: image_info.as_ref().map(|(_, w, h)| format!("{{\"width\":{},\"height\":{}}}", w, h)),
         };
 
         if let Ok(db) = state.db.lock() {
@@ -281,6 +355,53 @@ fn process_clipboard_change_impl(text: &str, last: &mut String, app_handle: &App
     }
 
     *last = text.to_string();
+}
+
+// Simple encryption for sensitive content (XOR with key for demo - use AES in production)
+fn encrypt_sensitive_content(content: &str) -> String {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::Aes256Gcm;
+    use rand::RngCore;
+    
+    // Generate a random nonce
+    let mut nonce_bytes = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    
+    // Use a fixed key for demo (in production, derive from user password)
+    let key = aes_gcm::Key::<Aes256Gcm>::from_slice(b"SunSaltyBoardSecretKey1234567890!");
+    let cipher = Aes256Gcm::new(key);
+    
+    match cipher.encrypt(&nonce_bytes.into(), content.as_bytes()) {
+        Ok(ciphertext) => {
+            // Combine nonce + ciphertext and encode as base64
+            let mut result = nonce_bytes.to_vec();
+            result.extend_from_slice(&ciphertext);
+            BASE64.encode(&result)
+        }
+        Err(_) => content.to_string(), // Fallback to plaintext on error
+    }
+}
+
+// Decrypt sensitive content
+#[allow(dead_code)]
+fn decrypt_sensitive_content(encrypted: &str) -> String {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::Aes256Gcm;
+    
+    if let Ok(data) = BASE64.decode(encrypted) {
+        if data.len() > 12 {
+            let nonce_bytes: &[u8; 12] = &data[..12].try_into().unwrap();
+            let ciphertext = &data[12..];
+            
+            let key = aes_gcm::Key::<Aes256Gcm>::from_slice(b"SunSaltyBoardSecretKey1234567890!");
+            let cipher = Aes256Gcm::new(key);
+            
+            if let Ok(plaintext) = cipher.decrypt(&nonce_bytes.into(), ciphertext) {
+                return String::from_utf8_lossy(&plaintext).to_string();
+            }
+        }
+    }
+    encrypted.to_string()
 }
 
 // Windows API imports
