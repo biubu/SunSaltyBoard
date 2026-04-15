@@ -6,7 +6,7 @@ use crate::database::ClipboardItem;
 use crate::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,17 +58,17 @@ impl ClipboardManager {
     #[cfg(windows)]
     pub fn start(&self, app_handle: AppHandle) {
         use std::thread;
-        use std::time::Duration;
         use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-        use windows::Win32::Graphics::Gdi::HGDIOBJ;
         use windows::Win32::System::DataExchange::AddClipboardFormatListener;
         use windows::Win32::System::Ole::OleGetClipboard;
         use windows::Win32::UI::WindowsAndMessaging::{
             DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, RegisterClassExW,
             SendMessageW, TranslateMessage, CreateWindowExW, CS_HREDRAW, CS_VREDRAW,
-            HICON, HINSTANCE, IDI_APPLICATION, IDC_ARROW, CW_USEDEFAULT, WM_CLIPBOARDUPDATE,
+            IDI_APPLICATION, IDC_ARROW, CW_USEDEFAULT, WM_CLIPBOARDUPDATE,
             WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
         };
+        use windows::Win32::Foundation::HINSTANCE;
+        use windows_core::PCWSTR;
 
         let running = self.running.clone();
         let last_content = self.last_content.clone();
@@ -93,7 +93,7 @@ impl ClipboardManager {
                     style: CS_HREDRAW | CS_VREDRAW,
                     lpfnWndProc: Some(window_proc),
                     hInstance: instance,
-                    lpszClassName: class_name.as_ptr(),
+                    lpszClassName: PCWSTR(class_name.as_ptr()),
                     hCursor: windows::Win32::UI::WindowsAndMessaging::LoadCursorW(
                         HINSTANCE::default(),
                         IDC_ARROW,
@@ -104,10 +104,11 @@ impl ClipboardManager {
 
                 RegisterClassExW(&wc);
 
+                let window_name = widestring::U16CString::from_str("SunSaltyBoardHiddenWindow").unwrap();
                 let hwnd = CreateWindowExW(
                     Default::default(),
-                    class_name.as_ptr(),
-                    widestring::U16CString::from_str("SunSaltyBoardHiddenWindow").unwrap().as_ptr(),
+                    PCWSTR(class_name.as_ptr()),
+                    PCWSTR(window_name.as_ptr()),
                     WS_OVERLAPPEDWINDOW,
                     CW_USEDEFAULT,
                     CW_USEDEFAULT,
@@ -117,9 +118,9 @@ impl ClipboardManager {
                     None,
                     instance,
                     None,
-                );
+                ).unwrap_or_default();
 
-                if hwnd.0.is_null() {
+                if hwnd.is_null() {
                     log::error!("Failed to create hidden window");
                     return;
                 }
@@ -210,9 +211,9 @@ struct ClipboardWindowState {
 
 static CLIPBOARD_STATE: Mutex<ClipboardWindowState> = Mutex::new(ClipboardWindowState {
     app_handle: None,
-    last_content: std::sync::Mutex::new(String::new()),
-    last_image_hash: std::sync::Mutex::new(0),
-    running: std::sync::atomic::AtomicBool::new(false),
+    last_content: Arc::new(Mutex::new(String::new())),
+    last_image_hash: Arc::new(Mutex::new(0)),
+    running: Arc::new(AtomicBool::new(false)),
 });
 
 #[cfg(windows)]
@@ -222,7 +223,7 @@ unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    use windows::Win32::UI::WindowsAndMessaging::WM_CLIPBOARDUPDATE;
+    use windows::Win32::UI::WindowsAndMessaging::{WM_CLIPBOARDUPDATE, DefWindowProcW};
 
     if msg == WM_CLIPBOARDUPDATE {
         if let Some(app_handle) = CLIPBOARD_STATE.lock().unwrap().app_handle.clone() {
@@ -248,7 +249,7 @@ unsafe extern "system" fn window_proc(
                         // Convert image to base64 for storage
                         let width = image_data.width;
                         let height = image_data.height;
-                        let rgba_data = image_data.bytes();
+                        let rgba_data = &image_data.bytes;
                         
                         // Create PNG data (simplified - in production use proper PNG encoding)
                         let png_data = encode_image_to_png(rgba_data, width, height);
@@ -280,7 +281,7 @@ fn calculate_image_hash(image: &arboard::ImageData) -> u64 {
     image.width.hash(&mut hasher);
     image.height.hash(&mut hasher);
     // Hash only a sample of pixels for performance
-    let bytes = image.bytes();
+    let bytes = &image.bytes;
     let step = std::cmp::max(1, bytes.len() / 1000);
     for i in (0..bytes.len()).step_by(step) {
         bytes[i].hash(&mut hasher);
@@ -289,7 +290,7 @@ fn calculate_image_hash(image: &arboard::ImageData) -> u64 {
 }
 
 // Simple PNG encoding placeholder (in production, use png crate)
-fn encode_image_to_png(rgba_data: &[u8], width: usize, height: usize) -> Vec<u8> {
+fn encode_image_to_png(rgba_data: &[u8], _width: usize, _height: usize) -> Vec<u8> {
     // For now, just return the raw RGBA data
     // In production, use the `png` crate to properly encode
     rgba_data.to_vec()
@@ -313,7 +314,7 @@ fn process_clipboard_change_impl(
             let lower_text = text.to_lowercase();
             if sensitive_patterns.iter().any(|p| lower_text.contains(p)) {
                 log::info!("Skipping sensitive content");
-                *last = text.clone();
+                *last = text.to_string();
                 return;
             }
         }
@@ -396,7 +397,7 @@ fn decrypt_sensitive_content(encrypted: &str) -> String {
             let key = aes_gcm::Key::<Aes256Gcm>::from_slice(b"SunSaltyBoardSecretKey1234567890!");
             let cipher = Aes256Gcm::new(key);
             
-            if let Ok(plaintext) = cipher.decrypt(&nonce_bytes.into(), ciphertext) {
+            if let Ok(plaintext) = cipher.decrypt(&(*nonce_bytes).into(), ciphertext) {
                 return String::from_utf8_lossy(&plaintext).to_string();
             }
         }
@@ -406,4 +407,4 @@ fn decrypt_sensitive_content(encrypted: &str) -> String {
 
 // Windows API imports
 #[cfg(windows)]
-use windows::Win32::UI::WindowsAndMessaging::{LoadIconW, IDI_APPLICATION};
+use windows::Win32::UI::WindowsAndMessaging::LoadIconW;

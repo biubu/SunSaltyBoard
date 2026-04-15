@@ -20,7 +20,7 @@ fn decrypt_sensitive_content(encrypted: &str) -> String {
             let key = aes_gcm::Key::<Aes256Gcm>::from_slice(b"SunSaltyBoardSecretKey1234567890!");
             let cipher = Aes256Gcm::new(key);
             
-            if let Ok(plaintext) = cipher.decrypt(&nonce_bytes.into(), ciphertext) {
+            if let Ok(plaintext) = cipher.decrypt(&(*nonce_bytes).into(), ciphertext) {
                 return String::from_utf8_lossy(&plaintext).to_string();
             }
         }
@@ -103,9 +103,9 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
                 let img = arboard::ImageData {
                     width,
                     height,
-                    bytes: image_data.into(),
+                    bytes: std::borrow::Cow::Borrowed(&image_data),
                 };
-                clipboard.set_image(&img).map_err(|e| e.to_string())?;
+                clipboard.set_image(img).map_err(|e| e.to_string())?;
             } else {
                 // Fallback to text preview
                 clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
@@ -132,7 +132,7 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
         thread::sleep(Duration::from_millis(100));
 
         unsafe {
-            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_CONTROL, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
+            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
 
             // Press Ctrl
             keybd_event(VK_LCONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
@@ -371,7 +371,7 @@ pub struct SyncStatus {
 }
 
 #[command]
-pub fn trigger_sync(state: State<'_, AppState>) -> Result<SyncStatus, String> {
+pub fn trigger_sync(_state: State<'_, AppState>) -> Result<SyncStatus, String> {
     log::info!("Triggering sync");
     Ok(SyncStatus {
         connected: false,
