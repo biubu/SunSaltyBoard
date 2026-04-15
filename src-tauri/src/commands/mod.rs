@@ -1,7 +1,32 @@
 use crate::database::{ClipboardItem, Group, Hotkey, Plugin, Tag};
 use crate::AppState;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use tauri::{command, AppHandle, Manager, State};
+
+// Decrypt sensitive content (imported from clipboard module logic)
+fn decrypt_sensitive_content(encrypted: &str) -> String {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::Aes256Gcm;
+    
+    if let Ok(data) = BASE64.decode(encrypted) {
+        if data.len() > 12 {
+            let nonce_bytes: &[u8; 12] = match data[..12].try_into() {
+                Ok(arr) => arr,
+                Err(_) => return encrypted.to_string(),
+            };
+            let ciphertext = &data[12..];
+            
+            let key = aes_gcm::Key::<Aes256Gcm>::from_slice(b"SunSaltyBoardSecretKey1234567890!");
+            let cipher = Aes256Gcm::new(key);
+            
+            if let Ok(plaintext) = cipher.decrypt(&nonce_bytes.into(), ciphertext) {
+                return String::from_utf8_lossy(&plaintext).to_string();
+            }
+        }
+    }
+    encrypted.to_string()
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -46,12 +71,50 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
     // 1. Write content to clipboard using arboard
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
 
-    // Only handle text content for now
-    if item.content_type == "text" {
-        clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
-    } else {
-        // For non-text, fall back to just copying text representation
-        clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
+    // Handle different content types
+    match item.content_type.as_str() {
+        "text" => {
+            // Check if content is encrypted and decrypt if needed
+            let content = if item.content.starts_with("AAAAAAAAAAAA") || item.content.len() > 100 && item.content.chars().take(20).all(|c| c.is_alphanumeric() || c == '+' || c == '/') {
+                // Try to decrypt (heuristic: base64 encoded encrypted content)
+                decrypt_sensitive_content(&item.content)
+            } else {
+                item.content.clone()
+            };
+            clipboard.set_text(&content).map_err(|e| e.to_string())?;
+        }
+        "image" => {
+            // Decode base64 image data
+            if let Ok(image_data) = BASE64.decode(&item.content) {
+                // Parse metadata for dimensions
+                let (width, height) = if let Some(ref meta) = item.metadata {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(meta) {
+                        let w = json["width"].as_u64().unwrap_or(100) as usize;
+                        let h = json["height"].as_u64().unwrap_or(100) as usize;
+                        (w, h)
+                    } else {
+                        (100, 100)
+                    }
+                } else {
+                    (100, 100)
+                };
+                
+                // Create image data (assuming RGBA format)
+                let img = arboard::ImageData {
+                    width,
+                    height,
+                    bytes: image_data.into(),
+                };
+                clipboard.set_image(&img).map_err(|e| e.to_string())?;
+            } else {
+                // Fallback to text preview
+                clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
+            }
+        }
+        _ => {
+            // For other types, fall back to text representation
+            clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
+        }
     }
 
     // 2. Hide the window

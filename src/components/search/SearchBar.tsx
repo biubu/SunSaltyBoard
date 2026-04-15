@@ -1,18 +1,39 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useStore } from "../../store";
 
 export function SearchBar() {
   const { searchQuery, setSearchQuery, search } = useStore();
   const [localQuery, setLocalQuery] = useState(searchQuery);
-
+  
+  // Debounce search to avoid excessive API calls
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  
   const handleSearch = useCallback(
     (value: string) => {
       setLocalQuery(value);
       setSearchQuery(value);
-      search(value);
+      
+      // Clear previous timeout
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+      
+      // Debounce search by 300ms
+      debounceRef.current = setTimeout(() => {
+        search(value);
+      }, 300);
     },
     [setSearchQuery, search]
   );
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="relative" style={{ margin: '10px' }}>
