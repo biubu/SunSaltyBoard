@@ -45,6 +45,8 @@ export interface Settings {
   sync_enabled: boolean;
   sync_server: string | null;
   theme: string;
+  sensitive_filter: boolean;
+  encrypt_sensitive: boolean;
 }
 
 export interface SyncStatus {

@@ -205,7 +205,7 @@ pub fn toggle_plugin(id: String, enabled: bool) -> Result<(), String> {
 }
 
 // Settings
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub max_history_size: i32,
     pub auto_start: bool,
@@ -214,6 +214,8 @@ pub struct Settings {
     pub sync_enabled: bool,
     pub sync_server: Option<String>,
     pub theme: String,
+    pub sensitive_filter: bool,
+    pub encrypt_sensitive: bool,
 }
 
 impl Default for Settings {
@@ -226,6 +228,8 @@ impl Default for Settings {
             sync_enabled: false,
             sync_server: None,
             theme: "dark".to_string(),
+            sensitive_filter: false,
+            encrypt_sensitive: false,
         }
     }
 }
@@ -259,6 +263,12 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     if let Ok(Some(theme)) = db.get_setting("theme") {
         settings.theme = theme;
     }
+    if let Ok(Some(sensitive_filter)) = db.get_setting("sensitive_filter") {
+        settings.sensitive_filter = sensitive_filter == "true";
+    }
+    if let Ok(Some(encrypt_sensitive)) = db.get_setting("encrypt_sensitive") {
+        settings.encrypt_sensitive = encrypt_sensitive == "true";
+    }
 
     Ok(settings)
 }
@@ -281,6 +291,10 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
             .map_err(|e| e.to_string())?;
     }
     db.set_setting("theme", &settings.theme).map_err(|e| e.to_string())?;
+    db.set_setting("sensitive_filter", &settings.sensitive_filter.to_string())
+        .map_err(|e| e.to_string())?;
+    db.set_setting("encrypt_sensitive", &settings.encrypt_sensitive.to_string())
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }

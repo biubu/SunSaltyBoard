@@ -47,6 +47,7 @@ uuid = { version = "1", features = ["v4"] }
 
 # Clipboard
 arboard = "3"
+widestring = "1"
 
 # Logging
 log = "0.4"

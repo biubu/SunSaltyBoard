@@ -38,29 +38,8 @@ interface AppStore {
 }
 
 export const useStore = create<AppStore>((set, get) => ({
-  // Initial state with sample data
-  items: [
-    {
-      id: "sample-1",
-      content_type: "text",
-      content: "这是一条测试剪贴内容，用于调试列表样式",
-      preview: "这是一条测试剪贴内容，用于调试列表样式",
-      group_id: null,
-      created_at: new Date().toISOString(),
-      is_favorite: false,
-      metadata: null,
-    },
-    {
-      id: "sample-2",
-      content_type: "text",
-      content: "第二测试内容，Hello ClipStash!",
-      preview: "第二测试内容，Hello ClipStash!",
-      group_id: null,
-      created_at: new Date(Date.now() - 60000).toISOString(),
-      is_favorite: false,
-      metadata: null,
-    },
-  ] as ClipboardItem[],
+  // Initial state
+  items: [] as ClipboardItem[],
   groups: [],
   settings: null,
   selectedGroup: null,

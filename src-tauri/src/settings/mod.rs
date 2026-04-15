@@ -12,6 +12,8 @@ pub struct Settings {
     pub sync_enabled: bool,
     pub sync_server: Option<String>,
     pub theme: String,
+    pub sensitive_filter: bool,
+    pub encrypt_sensitive: bool,
 }
 
 impl Default for Settings {
@@ -24,6 +26,8 @@ impl Default for Settings {
             sync_enabled: false,
             sync_server: None,
             theme: "dark".to_string(),
+            sensitive_filter: false,
+            encrypt_sensitive: false,
         }
     }
 }
@@ -57,6 +61,8 @@ impl Settings {
                     if val.is_empty() { None } else { Some(val) }
                 },
                 theme: get_setting("theme", "dark"),
+                sensitive_filter: get_setting("sensitive_filter", "false") == "true",
+                encrypt_sensitive: get_setting("encrypt_sensitive", "false") == "true",
             };
         }
 

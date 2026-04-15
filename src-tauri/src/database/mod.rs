@@ -146,6 +146,8 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS idx_items_created_at ON clipboard_items(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_items_group_id ON clipboard_items(group_id);
+            CREATE INDEX IF NOT EXISTS idx_items_favorite ON clipboard_items(is_favorite);
+            CREATE INDEX IF NOT EXISTS idx_items_content_type ON clipboard_items(content_type);
             "#,
         )?;
         Ok(())
