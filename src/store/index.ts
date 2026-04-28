@@ -7,7 +7,6 @@ import type {
 import * as api from "../services/api";
 
 interface AppStore {
-  // State
   items: ClipboardItem[];
   groups: Group[];
   settings: Settings | null;
@@ -16,12 +15,12 @@ interface AppStore {
   isLoading: boolean;
   error: string | null;
 
-  // Actions
   loadHistory: () => Promise<void>;
   search: (query: string) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
   pasteItem: (item: ClipboardItem) => Promise<void>;
   pasteToActive: (item: ClipboardItem) => Promise<void>;
+  toggleFavorite: (id: string) => Promise<void>;
 
   loadGroups: () => Promise<void>;
   createGroup: (name: string, color: string) => Promise<void>;
@@ -33,34 +32,11 @@ interface AppStore {
 
   setSelectedGroup: (group: Group | null) => void;
   setSearchQuery: (query: string) => void;
-
   clearError: () => void;
 }
 
 export const useStore = create<AppStore>((set, get) => ({
-  // Initial state with sample data
-  items: [
-    {
-      id: "sample-1",
-      content_type: "text",
-      content: "这是一条测试剪贴内容，用于调试列表样式",
-      preview: "这是一条测试剪贴内容，用于调试列表样式",
-      group_id: null,
-      created_at: new Date().toISOString(),
-      is_favorite: false,
-      metadata: null,
-    },
-    {
-      id: "sample-2",
-      content_type: "text",
-      content: "第二测试内容，Hello ClipStash!",
-      preview: "第二测试内容，Hello ClipStash!",
-      group_id: null,
-      created_at: new Date(Date.now() - 60000).toISOString(),
-      is_favorite: false,
-      metadata: null,
-    },
-  ] as ClipboardItem[],
+  items: [],
   groups: [],
   settings: null,
   selectedGroup: null,
@@ -68,11 +44,10 @@ export const useStore = create<AppStore>((set, get) => ({
   isLoading: false,
   error: null,
 
-  // Clipboard actions
   loadHistory: async () => {
     set({ isLoading: true, error: null });
     try {
-      const items = await api.getClipboardHistory(100, 0);
+      const items = await api.getClipboardHistory(200, 0);
       set({ items, isLoading: false });
     } catch (e) {
       set({ error: String(e), isLoading: false });
@@ -119,7 +94,19 @@ export const useStore = create<AppStore>((set, get) => ({
     }
   },
 
-  // Group actions
+  toggleFavorite: async (id: string) => {
+    try {
+      const isFav = await api.toggleFavorite(id);
+      set((state) => ({
+        items: state.items.map((item) =>
+          item.id === id ? { ...item, is_favorite: isFav } : item
+        ),
+      }));
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
   loadGroups: async () => {
     try {
       const groups = await api.getGroups();
@@ -162,7 +149,6 @@ export const useStore = create<AppStore>((set, get) => ({
     }
   },
 
-  // Settings actions
   loadSettings: async () => {
     try {
       const settings = await api.getSettings();
@@ -181,7 +167,6 @@ export const useStore = create<AppStore>((set, get) => ({
     }
   },
 
-  // UI actions
   setSelectedGroup: (group) => set({ selectedGroup: group }),
   setSearchQuery: (query) => set({ searchQuery: query }),
   clearError: () => set({ error: null }),

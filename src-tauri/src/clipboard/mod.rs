@@ -7,7 +7,7 @@ use crate::database::ClipboardItem;
 use crate::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +97,10 @@ impl ClipboardManager {
                             if let Ok(db) = state.db.lock() {
                                 if let Err(e) = db.insert_clipboard_item(&item) {
                                     log::error!("Failed to insert clipboard item: {}", e);
+                                }
+                                // Enforce history limit
+                                if let Ok(settings) = state.settings.lock() {
+                                    let _ = db.prune_history(settings.max_history_size);
                                 }
                             }
 

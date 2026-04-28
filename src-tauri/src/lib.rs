@@ -16,11 +16,13 @@ use tauri::{
 pub use clipboard::ClipboardManager;
 pub use database::Database;
 pub use settings::Settings;
+pub use sync::SyncManager;
 
 pub struct AppState {
     pub db: Arc<Mutex<Database>>,
     pub clipboard_manager: Arc<ClipboardManager>,
-    pub settings: Settings,
+    pub settings: Arc<Mutex<Settings>>,
+    pub sync_manager: Arc<SyncManager>,
 }
 
 fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
@@ -81,15 +83,12 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
         let screen_width = GetSystemMetrics(SM_CXSCREEN) as i32;
         let screen_height = GetSystemMetrics(SM_CYSCREEN) as i32;
 
-        // Window size
         let window_width = 480;
         let window_height = 420;
 
-        // Calculate position near mouse, keeping window on screen
         let mut x = point.x - (window_width / 2);
-        let mut y = point.y - 50; // Slightly above cursor
+        let mut y = point.y - 50;
 
-        // Ensure window stays within screen bounds
         let margin = 10;
         if x < margin {
             x = margin;
@@ -130,30 +129,28 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // Initialize database
             let db = Database::new(&app_handle).expect("Failed to initialize database");
 
-            // Initialize settings
-            let settings = Settings::load(&app_handle);
+            let settings = Arc::new(Mutex::new(Settings::load(&app_handle)));
 
-            // Initialize clipboard manager
             let clipboard_manager = Arc::new(ClipboardManager::new());
 
-            // Store state
+            let sync_manager = Arc::new(SyncManager::new());
+
             app.manage(AppState {
                 db: Arc::new(Mutex::new(db)),
                 clipboard_manager,
                 settings,
+                sync_manager,
             });
 
-            // Setup system tray
             setup_tray(app)?;
 
-            // Start clipboard monitoring
             let state = app.state::<AppState>();
             state.clipboard_manager.start(app_handle.clone());
+            state.sync_manager.start(app_handle.clone());
 
-            // Register global shortcut - show window near mouse
+            // Register global shortcut
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
             let shortcut: Shortcut = "Ctrl+Shift+V".parse().unwrap();
@@ -169,7 +166,6 @@ pub fn run() {
                 log::error!("Failed to register global shortcut: {}", e);
             }
 
-            // Keep window hidden initially
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
             }
@@ -182,6 +178,7 @@ pub fn run() {
             commands::paste_item,
             commands::paste_to_active,
             commands::delete_item,
+            commands::toggle_favorite,
             commands::get_groups,
             commands::create_group,
             commands::delete_group,

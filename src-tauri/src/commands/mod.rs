@@ -1,4 +1,5 @@
 use crate::database::{ClipboardItem, Group, Hotkey, Plugin, Tag};
+use crate::settings::Settings;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::{command, AppHandle, Manager, State};
@@ -35,7 +36,6 @@ pub fn search_clipboard(
 #[command]
 pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
     log::info!("Pasting item: {} of type {}", item.id, item.content_type);
-    // Clipboard paste functionality - to be implemented with proper Windows API
     Ok(())
 }
 
@@ -43,44 +43,31 @@ pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
 pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String> {
     log::info!("Paste to active: {} of type {}", item.id, item.content_type);
 
-    // 1. Write content to clipboard using arboard
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
 
-    // Only handle text content for now
     if item.content_type == "text" {
         clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
     } else {
-        // For non-text, fall back to just copying text representation
         clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
     }
 
-    // 2. Hide the window
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
 
-    // 3. Simulate Ctrl+V keypress using windows-rs
     #[cfg(windows)]
     {
         use std::thread;
         use std::time::Duration;
 
-        // Small delay to ensure window is hidden before pasting
         thread::sleep(Duration::from_millis(100));
 
         unsafe {
             use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_CONTROL, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
 
-            // Press Ctrl
             keybd_event(VK_LCONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
-
-            // Press V
             keybd_event(VK_V.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
-
-            // Release V
             keybd_event(VK_V.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-
-            // Release Ctrl
             keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
         }
     }
@@ -92,6 +79,12 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
 pub fn delete_item(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.delete_item(&id).map_err(|e| e.to_string())
+}
+
+#[command]
+pub fn toggle_favorite(state: State<'_, AppState>, id: String) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.toggle_favorite(&id).map_err(|e| e.to_string())
 }
 
 // Groups
@@ -193,48 +186,20 @@ pub fn update_hotkey(
 // Plugins
 #[command]
 pub fn get_plugins() -> Result<Vec<Plugin>, String> {
-    // TODO: Implement plugin loading
     Ok(vec![])
 }
 
 #[command]
 pub fn toggle_plugin(id: String, enabled: bool) -> Result<(), String> {
     log::info!("Toggle plugin {}: {}", id, enabled);
-    // TODO: Implement plugin toggle
     Ok(())
 }
 
 // Settings
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Settings {
-    pub max_history_size: i32,
-    pub auto_start: bool,
-    pub minimize_to_tray: bool,
-    pub global_shortcut: String,
-    pub sync_enabled: bool,
-    pub sync_server: Option<String>,
-    pub theme: String,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            max_history_size: 500,
-            auto_start: false,
-            minimize_to_tray: true,
-            global_shortcut: "Ctrl+Shift+V".to_string(),
-            sync_enabled: false,
-            sync_server: None,
-            theme: "dark".to_string(),
-        }
-    }
-}
-
 #[command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
-    // Try to load from database, fall back to defaults
-    let mut settings = Settings::default();
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let mut settings = Settings::default();
 
     if let Ok(Some(max_history)) = db.get_setting("max_history_size") {
         if let Ok(v) = max_history.parse() {
@@ -282,6 +247,10 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
     }
     db.set_setting("theme", &settings.theme).map_err(|e| e.to_string())?;
 
+    // Also update in-memory settings
+    let mut state_settings = state.settings.lock().map_err(|e| e.to_string())?;
+    *state_settings = settings;
+
     Ok(())
 }
 
@@ -295,20 +264,23 @@ pub struct SyncStatus {
 
 #[command]
 pub fn trigger_sync(state: State<'_, AppState>) -> Result<SyncStatus, String> {
-    log::info!("Triggering sync");
+    let sync_manager = &state.sync_manager;
+    let status = sync_manager.get_status();
     Ok(SyncStatus {
-        connected: false,
-        last_sync: None,
-        status: "idle".to_string(),
+        connected: status.connected,
+        last_sync: status.last_sync,
+        status: status.status,
     })
 }
 
 #[command]
-pub fn get_sync_status() -> Result<SyncStatus, String> {
+pub fn get_sync_status(state: State<'_, AppState>) -> Result<SyncStatus, String> {
+    let sync_manager = &state.sync_manager;
+    let status = sync_manager.get_status();
     Ok(SyncStatus {
-        connected: false,
-        last_sync: None,
-        status: "idle".to_string(),
+        connected: status.connected,
+        last_sync: status.last_sync,
+        status: status.status,
     })
 }
 

@@ -36,6 +36,10 @@ export async function deleteItem(id: string): Promise<void> {
   return invoke("delete_item", { id });
 }
 
+export async function toggleFavorite(id: string): Promise<boolean> {
+  return invoke("toggle_favorite", { id });
+}
+
 // Groups
 export async function getGroups(): Promise<Group[]> {
   return invoke("get_groups");

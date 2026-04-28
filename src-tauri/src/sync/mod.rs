@@ -4,7 +4,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use crate::database::ClipboardItem;
 use crate::AppState;
-use tauri::{AppHandle, Emitter, State, Manager};
+use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncStatus {
@@ -60,7 +60,7 @@ impl SyncManager {
 
         let mut status = self.status.lock().unwrap();
         status.status = "syncing".to_string();
-        let current_status = status.clone();
+        let _current_status = status.clone();
         drop(status);
 
         if server_url.is_none() {
@@ -116,7 +116,7 @@ impl SyncManager {
         Ok(())
     }
 
-    pub fn start(&self, app_handle: AppHandle) {
+    pub fn start(&self, _app_handle: AppHandle) {
         let running = self.running.clone();
         running.store(true, Ordering::SeqCst);
         log::info!("Sync manager started");

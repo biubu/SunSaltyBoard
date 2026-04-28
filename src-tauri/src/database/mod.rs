@@ -250,6 +250,29 @@ impl Database {
         Ok(is_favorite != 0)
     }
 
+    pub fn prune_history(&self, max_size: i32) -> Result<usize> {
+        let count: i32 = self.conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items",
+            [],
+            |row| row.get(0),
+        )?;
+        if count <= max_size {
+            return Ok(0);
+        }
+        let to_delete = count - max_size;
+        self.conn.execute(
+            "DELETE FROM clipboard_items WHERE id IN (
+                SELECT id FROM clipboard_items
+                WHERE is_favorite = 0
+                ORDER BY created_at ASC
+                LIMIT ?1
+            )",
+            params![to_delete],
+        )?;
+        let deleted = self.conn.changes() as usize;
+        Ok(deleted)
+    }
+
     // Groups
     pub fn get_groups(&self) -> Result<Vec<Group>> {
         let mut stmt = self
