@@ -28,5 +28,3 @@ src-tauri/target/
 src-tauri/Cargo.lock
 src-tauri/convert-icon.cjs
 
-# Build output
-index.html
