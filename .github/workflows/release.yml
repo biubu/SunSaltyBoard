@@ -11,24 +11,13 @@ permissions:
 
 jobs:
   release:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: 'windows-latest'
-            target: x86_64-pc-windows-msvc
-          - platform: 'windows-latest'
-            target: aarch64-pc-windows-msvc
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: 'npm'
@@ -36,7 +25,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc,aarch64-pc-windows-msvc
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -47,15 +36,12 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: --target ${{ matrix.target }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
-          name: bundles-${{ matrix.platform }}
-          path: |
-            src-tauri/target/*/release/bundle/nsis/*.exe
+          name: bundles-windows
+          path: src-tauri/target/*/release/bundle/**/*
