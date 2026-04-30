@@ -14,13 +14,17 @@ function App() {
     loadHistory();
     loadSettings();
 
-    const unlisten = listen<ClipboardItem>("clipboard-changed", (event) => {
+    let unlistenFn: (() => void) | undefined;
+
+    listen<ClipboardItem>("clipboard-changed", (event) => {
       console.log("Clipboard changed:", event.payload);
       loadHistory();
+    }).then((unlisten) => {
+      unlistenFn = unlisten;
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenFn?.();
     };
   }, []);
 
