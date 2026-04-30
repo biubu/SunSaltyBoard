@@ -44,4 +44,4 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: bundles-windows
-          path: src-tauri/target/*/release/bundle/**/*
+          path: src-tauri/target/release/bundle/**
