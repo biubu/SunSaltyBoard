@@ -38,11 +38,6 @@ jobs:
       - name: Build Tauri app
         run: npm run tauri build
 
-      - name: Get version
-        id: version
-        shell: bash
-        run: echo "version=$(jq -r '.version' src-tauri/tauri.conf.json)" >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
         run: |
           gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes
@@ -52,7 +47,9 @@ jobs:
       - name: Upload NSIS installer
         shell: bash
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          gh release upload "${{ github.ref_name }}" "src-tauri/target/release/bundle/nsis/SunSaltyBoard_${VERSION}_x64-setup.exe" --clobber
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          FILENAME="src-tauri/target/release/bundle/nsis/SunSaltyBoard_${TAG_VERSION}_x64-setup.exe"
+          cp "src-tauri/target/release/bundle/nsis/SunSaltyBoard_"*".exe" "$FILENAME"
+          gh release upload "${{ github.ref_name }}" "$FILENAME" --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
