@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStore } from "../../store";
 import { formatTimeAgo, truncateText, getContentTypeIcon } from "../../utils";
@@ -9,7 +9,7 @@ import * as api from "../../services/api";
 const ITEM_HEIGHT = 80;
 
 export function ClipboardList() {
-  const { items, isLoading, deleteItem, toggleFavorite, error, clearError } = useStore();
+  const { items, isLoading, deleteItem, toggleFavorite } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; item: ClipboardItem } | null>(null);
@@ -18,7 +18,7 @@ export function ClipboardList() {
     count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ITEM_HEIGHT,
-    overscan: 5,
+    overscan: 15,
   });
 
   const handlePaste = useCallback(async (item: ClipboardItem) => {
@@ -68,14 +68,6 @@ export function ClipboardList() {
     }
   }, [items, focusedIndex, virtualizer, handlePaste, deleteItem]);
 
-  // Auto-dismiss error after 5 seconds
-  useEffect(() => {
-    if (error) {
-      const t = setTimeout(clearError, 5000);
-      return () => clearTimeout(t);
-    }
-  }, [error, clearError]);
-
   if (isLoading && items.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -101,14 +93,6 @@ export function ClipboardList() {
       onKeyDown={handleKeyDown}
       onBlur={() => setFocusedIndex(-1)}
     >
-      {/* Error toast */}
-      {error && (
-        <div className="mx-2 mt-2 px-3 py-2 rounded-lg text-xs text-red-700 bg-red-50 border border-red-200 flex items-center justify-between">
-          <span>{error}</span>
-          <button onClick={clearError} className="ml-2 text-red-400 hover:text-red-600">✕</button>
-        </div>
-      )}
-
       <div
         style={{
           height: `${virtualizer.getTotalSize()}px`,

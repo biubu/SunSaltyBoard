@@ -58,10 +58,10 @@ impl SyncManager {
     pub async fn trigger_sync(&self, state: &AppState) -> Result<SyncStatus, String> {
         let server_url = self.server_url.lock().unwrap().clone();
 
-        let mut status = self.status.lock().unwrap();
-        status.status = "syncing".to_string();
-        let _current_status = status.clone();
-        drop(status);
+        {
+            let mut status = self.status.lock().unwrap();
+            status.status = "syncing".to_string();
+        }
 
         if server_url.is_none() {
             let mut status = self.status.lock().unwrap();
@@ -71,10 +71,12 @@ impl SyncManager {
 
         let url = server_url.unwrap();
 
-        // Get all items from local database
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        let items = db.get_clipboard_history(1000, 0)
-            .map_err(|e| e.to_string())?;
+        // Get all items from local database (lock dropped before await)
+        let items = {
+            let db = state.db.lock().map_err(|e| e.to_string())?;
+            db.get_clipboard_history(1000, 0)
+                .map_err(|e| e.to_string())?
+        };
 
         // Prepare sync payload
         let payload = SyncPayload {
@@ -101,19 +103,19 @@ impl SyncManager {
     }
 
     async fn sync_http(url: &str, payload: &SyncPayload) -> Result<(), String> {
-        // Using reqwest would be ideal here, but to avoid adding dependencies,
-        // we'll use a simple HTTP client implementation
-        // For production, you'd want to add reqwest to Cargo.toml
+        log::info!("Syncing {} items to {}", payload.items.len(), url);
 
-        log::info!("Sync to {} with {} items", url, payload.items.len());
+        let response = ureq::post(url)
+            .send_json(payload)
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
 
-        // Placeholder - actual implementation would use reqwest or similar
-        // For now, we just simulate a successful sync after a delay
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        // If we have a real server URL, we'd make the HTTP request here
-        // For now, return success if configured
-        Ok(())
+        let status = response.status();
+        if status.is_success() {
+            log::info!("Sync completed successfully");
+            Ok(())
+        } else {
+            Err(format!("Server returned status {}", status.as_u16()))
+        }
     }
 
     pub fn start(&self, _app_handle: AppHandle) {

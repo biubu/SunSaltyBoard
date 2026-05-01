@@ -83,29 +83,36 @@ impl ClipboardManager {
                         };
 
                         if let Some(state) = app_handle.try_state::<AppState>() {
-                            let item = ClipboardItem {
-                                id: Uuid::new_v4().to_string(),
-                                content_type: event.content_type.clone(),
-                                content: event.content.clone(),
-                                preview: event.preview.clone(),
-                                group_id: None,
-                                created_at: Utc::now().to_rfc3339(),
-                                is_favorite: false,
-                                metadata: event.metadata.clone(),
-                            };
-
                             if let Ok(db) = state.db.lock() {
-                                if let Err(e) = db.insert_clipboard_item(&item) {
-                                    log::error!("Failed to insert clipboard item: {}", e);
-                                }
-                                // Enforce history limit
-                                if let Ok(settings) = state.settings.lock() {
-                                    let _ = db.prune_history(settings.max_history_size);
-                                }
-                            }
+                                // Dedup: if same content already exists, just update timestamp
+                                if let Ok(Some(existing_id)) = db.find_by_content(&text) {
+                                    if let Err(e) = db.update_item_timestamp(&existing_id) {
+                                        log::error!("Failed to update item timestamp: {}", e);
+                                    }
+                                } else {
+                                    let item = ClipboardItem {
+                                        id: Uuid::new_v4().to_string(),
+                                        content_type: event.content_type.clone(),
+                                        content: event.content.clone(),
+                                        preview: event.preview.clone(),
+                                        group_id: None,
+                                        created_at: Utc::now().to_rfc3339(),
+                                        is_favorite: false,
+                                        metadata: event.metadata.clone(),
+                                    };
 
-                            if let Err(e) = app_handle.emit("clipboard-changed", &item) {
-                                log::error!("Failed to emit clipboard event: {}", e);
+                                    if let Err(e) = db.insert_clipboard_item(&item) {
+                                        log::error!("Failed to insert clipboard item: {}", e);
+                                    }
+                                    // Enforce history limit
+                                    if let Ok(settings) = state.settings.lock() {
+                                        let _ = db.prune_history(settings.max_history_size);
+                                    }
+
+                                    if let Err(e) = app_handle.emit("clipboard-changed", &item) {
+                                        log::error!("Failed to emit clipboard event: {}", e);
+                                    }
+                                }
                             }
                         }
 

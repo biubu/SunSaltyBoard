@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    SunSaltyBoard_lib::run()
+    sun_salty_board_lib::run()
 }

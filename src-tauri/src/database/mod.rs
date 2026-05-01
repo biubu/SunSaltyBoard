@@ -195,7 +195,17 @@ impl Database {
         Ok(items)
     }
 
+    /// Sanitize FTS5 query to prevent syntax errors from special characters
+    fn sanitize_fts_query(raw: &str) -> String {
+        // Escape double quotes inside the query
+        let escaped = raw.replace('"', "\"\"");
+        // Wrap in quotes to treat as literal phrase search
+        // This prevents FTS5 special chars (*, ^, (, ), etc.) from causing syntax errors
+        format!("\"{}\"", escaped)
+    }
+
     pub fn search_clipboard(&self, query: &str, limit: i32) -> Result<Vec<ClipboardItem>> {
+        let safe_query = Self::sanitize_fts_query(query);
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.content_type, c.content, c.preview, c.group_id, c.created_at, c.is_favorite, c.metadata
              FROM clipboard_items c
@@ -206,7 +216,7 @@ impl Database {
         )?;
 
         let items = stmt
-            .query_map(params![query, limit], |row| {
+            .query_map(params![safe_query, limit], |row| {
                 Ok(ClipboardItem {
                     id: row.get(0)?,
                     content_type: row.get(1)?,
@@ -221,6 +231,26 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(items)
+    }
+
+    pub fn find_by_content(&self, content: &str) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM clipboard_items WHERE content = ?1 LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![content])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn update_item_timestamp(&self, id: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE clipboard_items SET created_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
     }
 
     pub fn delete_item(&self, id: &str) -> Result<()> {

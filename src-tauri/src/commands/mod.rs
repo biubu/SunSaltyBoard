@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{command, AppHandle, Manager, State};
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct SearchResult {
     pub items: Vec<ClipboardItem>,
     pub total: usize,
@@ -36,6 +37,38 @@ pub fn search_clipboard(
 #[command]
 pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
     log::info!("Pasting item: {} of type {}", item.id, item.content_type);
+
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+
+    // Backup current clipboard
+    let original = clipboard.get_text().ok();
+
+    if item.content_type == "text" {
+        clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
+    } else {
+        clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(windows)]
+    {
+        use std::thread;
+        use std::time::Duration;
+        unsafe {
+            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
+
+            keybd_event(VK_LCONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+            keybd_event(VK_V.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
+            keybd_event(VK_V.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+            keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+
+    // Restore original clipboard
+    if let Some(orig) = original {
+        let _ = clipboard.set_text(&orig);
+    }
+
     Ok(())
 }
 
@@ -44,6 +77,9 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
     log::info!("Paste to active: {} of type {}", item.id, item.content_type);
 
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+
+    // Backup current clipboard content before overwriting
+    let original = clipboard.get_text().ok();
 
     if item.content_type == "text" {
         clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
@@ -63,13 +99,21 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
         thread::sleep(Duration::from_millis(100));
 
         unsafe {
-            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_CONTROL, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
+            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
 
             keybd_event(VK_LCONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
             keybd_event(VK_V.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
             keybd_event(VK_V.0 as u8, 0, KEYEVENTF_KEYUP, 0);
             keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
         }
+
+        // Wait for paste to complete, then restore original clipboard content
+        thread::sleep(Duration::from_millis(200));
+    }
+
+    // Restore original clipboard content
+    if let Some(orig) = original {
+        let _ = clipboard.set_text(&orig);
     }
 
     Ok(())
@@ -225,6 +269,11 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
         settings.theme = theme;
     }
 
+    // Configure sync manager with loaded settings
+    if settings.sync_enabled {
+        state.sync_manager.configure(settings.sync_server.clone());
+    }
+
     Ok(settings)
 }
 
@@ -255,29 +304,16 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
 }
 
 // Sync
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SyncStatus {
-    pub connected: bool,
-    pub last_sync: Option<String>,
-    pub status: String,
+#[command]
+pub async fn trigger_sync(state: State<'_, AppState>) -> Result<crate::sync::SyncStatus, String> {
+    state.sync_manager.trigger_sync(&state).await
 }
 
 #[command]
-pub fn trigger_sync(state: State<'_, AppState>) -> Result<SyncStatus, String> {
+pub fn get_sync_status(state: State<'_, AppState>) -> Result<crate::sync::SyncStatus, String> {
     let sync_manager = &state.sync_manager;
     let status = sync_manager.get_status();
-    Ok(SyncStatus {
-        connected: status.connected,
-        last_sync: status.last_sync,
-        status: status.status,
-    })
-}
-
-#[command]
-pub fn get_sync_status(state: State<'_, AppState>) -> Result<SyncStatus, String> {
-    let sync_manager = &state.sync_manager;
-    let status = sync_manager.get_status();
-    Ok(SyncStatus {
+    Ok(crate::sync::SyncStatus {
         connected: status.connected,
         last_sync: status.last_sync,
         status: status.status,

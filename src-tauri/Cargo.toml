@@ -6,7 +6,7 @@ authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "SunSaltyBoard_lib"
+name = "sun_salty_board_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -30,6 +30,9 @@ uuid = { version = "1", features = ["v4"] }
 
 # Clipboard
 arboard = "3"
+
+# HTTP client
+ureq = { version = "3", features = ["json"] }
 
 # Logging
 log = "0.4"

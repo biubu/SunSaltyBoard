@@ -1,15 +1,17 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useStore } from "../../store";
 
 export function SearchBar() {
   const { searchQuery, setSearchQuery, search } = useStore();
   const [localQuery, setLocalQuery] = useState(searchQuery);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const handleSearch = useCallback(
     (value: string) => {
       setLocalQuery(value);
       setSearchQuery(value);
-      search(value);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => search(value), 300);
     },
     [setSearchQuery, search]
   );

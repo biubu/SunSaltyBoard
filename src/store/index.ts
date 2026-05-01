@@ -48,7 +48,11 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const items = await api.getClipboardHistory(200, 0);
-      set({ items, isLoading: false });
+      const sorted = [...items].sort((a, b) => {
+        if (a.is_favorite !== b.is_favorite) return a.is_favorite ? -1 : 1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      set({ items: sorted, isLoading: false });
     } catch (e) {
       set({ error: String(e), isLoading: false });
     }
@@ -61,7 +65,11 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const items = await api.searchClipboard(query, 50);
-      set({ items, isLoading: false });
+      const sorted = [...items].sort((a, b) => {
+        if (a.is_favorite !== b.is_favorite) return a.is_favorite ? -1 : 1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+      set({ items: sorted, isLoading: false });
     } catch (e) {
       set({ error: String(e), isLoading: false });
     }
