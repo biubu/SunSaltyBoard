@@ -78,7 +78,7 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
 
     unsafe {
         let mut point = POINT::default();
-        GetCursorPos(&mut point);
+        let _ = GetCursorPos(&mut point);
 
         let screen_width = GetSystemMetrics(SM_CXSCREEN) as i32;
         let screen_height = GetSystemMetrics(SM_CYSCREEN) as i32;

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{command, AppHandle, Manager, State};
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct SearchResult {
     pub items: Vec<ClipboardItem>,
     pub total: usize,
@@ -63,7 +64,7 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
         thread::sleep(Duration::from_millis(100));
 
         unsafe {
-            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_CONTROL, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
+            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
 
             keybd_event(VK_LCONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
             keybd_event(VK_V.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
