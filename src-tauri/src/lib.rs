@@ -112,7 +112,65 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn show_window_near_mouse(window: &tauri::WebviewWindow) {
+    use enigo::{Enigo, Mouse, Settings};
+
+    let mut enigo = match Enigo::new(&Settings::default()) {
+        Ok(e) => e,
+        Err(_) => {
+            let _ = window.center();
+            let _ = window.show();
+            let _ = window.set_focus();
+            return;
+        }
+    };
+
+    if let Ok((mx, my)) = enigo.location() {
+        let (mx, my) = (mx as i32, my as i32);
+        let window_size = window.outer_size().unwrap_or(tauri::PhysicalSize { width: 300, height: 600 });
+        let window_width = window_size.width as i32;
+        let window_height = window_size.height as i32;
+
+        // Determine screen size from the monitor the cursor is on
+        let screen_size = window.available_monitors()
+            .ok()
+            .and_then(|monitors| {
+                monitors.into_iter().find(|m| {
+                    let pos = m.position();
+                    let size = m.size();
+                    mx >= pos.x && mx <= pos.x + size.width as i32
+                        && my >= pos.y && my <= pos.y + size.height as i32
+                })
+            })
+            .map(|m| {
+                let s = m.size();
+                (s.width as i32, s.height as i32)
+            })
+            .unwrap_or((1920, 1080));
+
+        let mut x = mx - (window_width / 2);
+        let mut y = my - 50;
+
+        let margin = 10;
+        let (screen_width, screen_height) = screen_size;
+        if x < margin { x = margin; }
+        if x + window_width > screen_width - margin { x = screen_width - window_width - margin; }
+        if y < margin { y = margin; }
+        if y + window_height > screen_height - margin { y = screen_height - window_height - margin; }
+
+        let _ = window.set_position(tauri::Position::Physical(
+            tauri::PhysicalPosition { x, y }
+        ));
+    } else {
+        let _ = window.center();
+    }
+
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     let _ = window.center();
     let _ = window.show();

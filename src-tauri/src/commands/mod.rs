@@ -64,6 +64,24 @@ pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
         thread::sleep(Duration::from_millis(200));
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        use std::thread;
+        use std::time::Duration;
+
+        thread::sleep(Duration::from_millis(100));
+
+        let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
+            .map_err(|e| format!("enigo init: {}", e))?;
+        enigo.key_down(enigo::Key::Control)
+            .map_err(|e| format!("failed key_down control: {}", e))?;
+        let _ = enigo.key_click(enigo::Key::Unicode('v'));
+        enigo.key_up(enigo::Key::Control)
+            .map_err(|e| format!("failed key_up control: {}", e))?;
+
+        thread::sleep(Duration::from_millis(200));
+    }
+
     // Restore original clipboard
     if let Some(orig) = original {
         let _ = clipboard.set_text(&orig);
@@ -108,6 +126,24 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
         }
 
         // Wait for paste to complete, then restore original clipboard content
+        thread::sleep(Duration::from_millis(200));
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::thread;
+        use std::time::Duration;
+
+        thread::sleep(Duration::from_millis(100));
+
+        let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
+            .map_err(|e| format!("enigo init: {}", e))?;
+        enigo.key_down(enigo::Key::Control)
+            .map_err(|e| format!("failed key_down control: {}", e))?;
+        let _ = enigo.key_click(enigo::Key::Unicode('v'));
+        enigo.key_up(enigo::Key::Control)
+            .map_err(|e| format!("failed key_up control: {}", e))?;
+
         thread::sleep(Duration::from_millis(200));
     }
 
