@@ -47,9 +47,6 @@ jobs:
       - name: Upload NSIS installer
         shell: bash
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          FILENAME="src-tauri/target/release/bundle/nsis/SunSaltyBoard_${TAG_VERSION}_x64-setup.exe"
-          cp "src-tauri/target/release/bundle/nsis/SunSaltyBoard_"*".exe" "$FILENAME"
-          gh release upload "${{ github.ref_name }}" "$FILENAME" --clobber
+          gh release upload "${{ github.ref_name }}" src-tauri/target/release/bundle/nsis/SunSaltyBoard_*.exe --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
