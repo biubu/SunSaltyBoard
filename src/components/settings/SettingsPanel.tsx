@@ -7,7 +7,7 @@ interface SettingsPanelProps {
 
 export function SettingsPanel({ settings, onUpdate }: SettingsPanelProps) {
   return (
-    <div className="mx-4 mt-2 p-4 rounded-lg border border-gray-200 bg-white shrink-0">
+    <div className="mx-5 mt-2 p-5 rounded-lg border border-gray-200 bg-white shrink-0">
       <h3 className="text-sm font-semibold text-gray-700 mb-3">设置</h3>
       <div className="space-y-3">
         <label className="flex items-center justify-between text-sm text-gray-600">
