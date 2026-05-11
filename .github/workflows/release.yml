@@ -57,7 +57,8 @@ jobs:
             libxdo-dev
 
       - name: Install frontend dependencies
-        run: npm ci
+        shell: bash
+        run: npm ci --no-audit --no-fund
 
       - name: Build Tauri app
         run: npm run tauri build
