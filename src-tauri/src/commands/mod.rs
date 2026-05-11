@@ -66,6 +66,7 @@ pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
 
     #[cfg(target_os = "linux")]
     {
+        use enigo::Keyboard;
         use std::thread;
         use std::time::Duration;
 
@@ -131,6 +132,7 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
 
     #[cfg(target_os = "linux")]
     {
+        use enigo::Keyboard;
         use std::thread;
         use std::time::Duration;
 
