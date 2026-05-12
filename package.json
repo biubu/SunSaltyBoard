@@ -1,7 +1,7 @@
 {
   "name": "paste",
   "private": true,
-  "version": "26.5.11",
+  "version": "26.5.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
