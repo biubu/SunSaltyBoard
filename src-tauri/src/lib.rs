@@ -1,8 +1,7 @@
+mod autostart;
 mod clipboard;
 mod commands;
 mod database;
-mod plugins;
-mod search;
 mod settings;
 mod sync;
 
@@ -12,6 +11,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
+use tauri_plugin_global_shortcut::Shortcut;
 
 pub use clipboard::ClipboardManager;
 pub use database::Database;
@@ -23,6 +23,8 @@ pub struct AppState {
     pub clipboard_manager: Arc<ClipboardManager>,
     pub settings: Arc<Mutex<Settings>>,
     pub sync_manager: Arc<SyncManager>,
+    pub current_shortcut: Arc<Mutex<Option<Shortcut>>>,
+    pub app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
 fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
@@ -189,8 +191,13 @@ pub fn run() {
             let app_handle = app.handle().clone();
 
             let db = Database::new(&app_handle).expect("Failed to initialize database");
+            let settings = Arc::new(Mutex::new(db.load_settings()));
 
-            let settings = Arc::new(Mutex::new(Settings::load(&app_handle)));
+            // Setup auto-start based on settings
+            {
+                let settings_guard = settings.lock().unwrap();
+                autostart::setup_autostart(settings_guard.auto_start);
+            }
 
             let clipboard_manager = Arc::new(ClipboardManager::new());
 
@@ -199,8 +206,10 @@ pub fn run() {
             app.manage(AppState {
                 db: Arc::new(Mutex::new(db)),
                 clipboard_manager,
-                settings,
+                settings: settings.clone(),
                 sync_manager,
+                current_shortcut: Arc::new(Mutex::new(None)),
+                app_handle: Arc::new(Mutex::new(Some(app_handle.clone()))),
             });
 
             setup_tray(app)?;
@@ -209,13 +218,17 @@ pub fn run() {
             state.clipboard_manager.start(app_handle.clone());
             state.sync_manager.start(app_handle.clone());
 
-            // Register global shortcut
+            // Register global shortcut from settings
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-            let shortcut: Shortcut = "Ctrl+Shift+V".parse().unwrap();
+            let shortcut_str = {
+                let settings_guard = settings.lock().unwrap();
+                settings_guard.global_shortcut.clone()
+            };
+            let shortcut: Shortcut = shortcut_str.parse().unwrap_or_else(|_| "Ctrl+Shift+V".parse().unwrap());
             let app_handle_clone = app_handle.clone();
 
-            if let Err(e) = app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
+            if let Err(e) = app.global_shortcut().on_shortcut(shortcut.clone(), move |_app, _shortcut, event| {
                 if event.state() == ShortcutState::Pressed {
                     if let Some(window) = app_handle_clone.get_webview_window("main") {
                         show_window_near_mouse(&window);
@@ -223,6 +236,10 @@ pub fn run() {
                 }
             }) {
                 log::error!("Failed to register global shortcut: {}", e);
+            } else {
+                let state = app.state::<AppState>();
+                let mut current_shortcut = state.current_shortcut.lock().unwrap();
+                *current_shortcut = Some(shortcut);
             }
 
             if let Some(window) = app.get_webview_window("main") {
@@ -249,6 +266,7 @@ pub fn run() {
             commands::remove_tag_from_item,
             commands::get_hotkeys,
             commands::update_hotkey,
+            commands::register_hotkey,
             commands::get_plugins,
             commands::toggle_plugin,
             commands::get_settings,

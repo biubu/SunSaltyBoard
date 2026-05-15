@@ -105,8 +105,12 @@ impl SyncManager {
     async fn sync_http(url: &str, payload: &SyncPayload) -> Result<(), String> {
         log::info!("Syncing {} items to {}", payload.items.len(), url);
 
-        let response = ureq::post(url)
-            .send_json(payload)
+        let client = reqwest::Client::new();
+        let response = client
+            .post(url)
+            .json(payload)
+            .send()
+            .await
             .map_err(|e| format!("HTTP request failed: {}", e))?;
 
         let status = response.status();

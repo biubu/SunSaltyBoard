@@ -1,7 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
-use rusqlite::{params, Connection};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -25,41 +22,5 @@ impl Default for Settings {
             sync_server: None,
             theme: "dark".to_string(),
         }
-    }
-}
-
-impl Settings {
-    pub fn load(app: &AppHandle) -> Self {
-        let app_dir = app
-            .path()
-            .app_data_dir()
-            .unwrap_or_else(|_| PathBuf::from("."));
-        let db_path = app_dir.join("clipstash.db");
-
-        if let Ok(conn) = Connection::open(&db_path) {
-            let get_setting = |key: &str, default: &str| -> String {
-                conn.query_row(
-                    "SELECT value FROM settings WHERE key = ?1",
-                    params![key],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|_| default.to_string())
-            };
-
-            return Self {
-                max_history_size: get_setting("max_history_size", "500").parse().unwrap_or(500),
-                auto_start: get_setting("auto_start", "false") == "true",
-                minimize_to_tray: get_setting("minimize_to_tray", "true") == "true",
-                global_shortcut: get_setting("global_shortcut", "Ctrl+Shift+V"),
-                sync_enabled: get_setting("sync_enabled", "false") == "true",
-                sync_server: {
-                    let val = get_setting("sync_server", "");
-                    if val.is_empty() { None } else { Some(val) }
-                },
-                theme: get_setting("theme", "dark"),
-            };
-        }
-
-        Self::default()
     }
 }

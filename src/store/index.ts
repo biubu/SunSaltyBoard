@@ -175,7 +175,15 @@ export const useStore = create<AppStore>((set, get) => ({
     }
   },
 
-  setSelectedGroup: (group) => set({ selectedGroup: group }),
+  setSelectedGroup: (group) => {
+    set({ selectedGroup: group });
+    const state = get();
+    if (group) {
+      set({ items: state.items.filter((i) => i.group_id === group.id) });
+    } else {
+      state.loadHistory();
+    }
+  },
   setSearchQuery: (query) => set({ searchQuery: query }),
   clearError: () => set({ error: null }),
 }));

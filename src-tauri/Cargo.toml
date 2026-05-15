@@ -31,8 +31,11 @@ uuid = { version = "1", features = ["v4"] }
 # Clipboard
 arboard = "3"
 
+base64 = "0.22"
+dirs = "5"
+
 # HTTP client
-ureq = { version = "3", features = ["json"] }
+reqwest = { version = "0.12", features = ["json"] }
 
 # Logging
 log = "0.4"

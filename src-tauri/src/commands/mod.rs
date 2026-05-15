@@ -34,21 +34,7 @@ pub fn search_clipboard(
     db.search_clipboard(&query, limit).map_err(|e| e.to_string())
 }
 
-#[command]
-pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
-    log::info!("Pasting item: {} of type {}", item.id, item.content_type);
-
-    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-
-    // Backup current clipboard
-    let original = clipboard.get_text().ok();
-
-    if item.content_type == "text" {
-        clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
-    } else {
-        clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
-    }
-
+fn simulate_ctrl_v() -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::thread;
@@ -83,7 +69,24 @@ pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
         thread::sleep(Duration::from_millis(200));
     }
 
-    // Restore original clipboard
+    Ok(())
+}
+
+#[command]
+pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
+    log::info!("Pasting item: {} of type {}", item.id, item.content_type);
+
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    let original = clipboard.get_text().ok();
+
+    if item.content_type == "text" {
+        clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
+    } else {
+        clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
+    }
+
+    simulate_ctrl_v()?;
+
     if let Some(orig) = original {
         let _ = clipboard.set_text(&orig);
     }
@@ -96,8 +99,6 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
     log::info!("Paste to active: {} of type {}", item.id, item.content_type);
 
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-
-    // Backup current clipboard content before overwriting
     let original = clipboard.get_text().ok();
 
     if item.content_type == "text" {
@@ -110,46 +111,8 @@ pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String
         let _ = window.hide();
     }
 
-    #[cfg(windows)]
-    {
-        use std::thread;
-        use std::time::Duration;
+    simulate_ctrl_v()?;
 
-        thread::sleep(Duration::from_millis(100));
-
-        unsafe {
-            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
-
-            keybd_event(VK_LCONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
-            keybd_event(VK_V.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
-            keybd_event(VK_V.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-        }
-
-        // Wait for paste to complete, then restore original clipboard content
-        thread::sleep(Duration::from_millis(200));
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        use enigo::Keyboard;
-        use std::thread;
-        use std::time::Duration;
-
-        thread::sleep(Duration::from_millis(100));
-
-        let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
-            .map_err(|e| format!("enigo init: {}", e))?;
-        enigo.key(enigo::Key::Control, enigo::Direction::Press)
-            .map_err(|e| format!("failed key_down control: {}", e))?;
-        let _ = enigo.key(enigo::Key::Unicode('v'), enigo::Direction::Click);
-        enigo.key(enigo::Key::Control, enigo::Direction::Release)
-            .map_err(|e| format!("failed key_up control: {}", e))?;
-
-        thread::sleep(Duration::from_millis(200));
-    }
-
-    // Restore original clipboard content
     if let Some(orig) = original {
         let _ = clipboard.set_text(&orig);
     }
@@ -263,6 +226,37 @@ pub fn update_hotkey(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.update_hotkey(&action, &key_combination)
         .map_err(|e| e.to_string())
+}
+
+#[command]
+pub fn register_hotkey(
+    state: State<'_, AppState>,
+    key_combination: String,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+    let app_handle = state.app_handle.lock().map_err(|e| e.to_string())?;
+    let app_handle = app_handle.as_ref().ok_or("App handle not available")?.clone();
+
+    let shortcut: Shortcut = key_combination.parse()
+        .map_err(|e| format!("Invalid shortcut format: {}", e))?;
+
+    let app_handle_clone = app_handle.clone();
+    if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut.clone(), move |_app, _shortcut, event| {
+        if event.state() == ShortcutState::Pressed {
+            if let Some(window) = app_handle_clone.get_webview_window("main") {
+                crate::show_window_near_mouse(&window);
+            }
+        }
+    }) {
+        return Err(format!("Failed to register shortcut: {}", e));
+    }
+
+    let mut current_shortcut = state.current_shortcut.lock().map_err(|e| e.to_string())?;
+    *current_shortcut = Some(shortcut);
+
+    log::info!("Hotkey registered: {}", key_combination);
+    Ok(())
 }
 
 // Plugins

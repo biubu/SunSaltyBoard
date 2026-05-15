@@ -1,14 +1,18 @@
 import { useRef, useState, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStore } from "../../store";
-import { formatTimeAgo, truncateText, getContentTypeIcon } from "../../utils";
+import { formatTimeAgo, truncateText } from "../../utils";
 import { ContextMenu } from "./ContextMenu";
 import type { ClipboardItem } from "../../types";
 import * as api from "../../services/api";
 
-const ITEM_HEIGHT = 80;
+const ITEM_HEIGHT = 44;
 
-export function ClipboardList() {
+interface ClipboardListProps {
+  theme: Record<string, string>;
+}
+
+export function ClipboardList({ theme }: ClipboardListProps) {
   const { items, isLoading, deleteItem, toggleFavorite } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -68,17 +72,19 @@ export function ClipboardList() {
     }
   }, [items, focusedIndex, virtualizer, handlePaste, deleteItem]);
 
+  const emptyText = theme.emptyText || "#9ca3af";
+
   if (isLoading && items.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-gray-400 text-sm">加载中...</div>
+        <div className="text-sm" style={{ color: emptyText }}>加载中...</div>
       </div>
     );
   }
 
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-gray-400">
+      <div className="flex flex-col items-center justify-center h-full" style={{ color: emptyText }}>
         <p className="text-sm">暂无剪贴历史</p>
         <p className="text-xs mt-1">复制内容后将自动记录</p>
       </div>
@@ -107,17 +113,17 @@ export function ClipboardList() {
               key={item.id}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
-              className="rounded-lg cursor-pointer transition-all duration-200 hover:bg-gray-100 relative"
+              className="cursor-pointer transition-colors duration-150 relative hover:bg-gray-50"
               style={{
                 position: "absolute",
                 top: 0,
                 left: 0,
                 width: "100%",
                 transform: `translateY(${virtualRow.start}px)`,
-                background: focusedIndex === virtualRow.index ? "#f0f4ff" : "#ffffff",
-                border: focusedIndex === virtualRow.index ? "2px solid #93c5fd" : "1px solid #e5e7eb",
-                marginBottom: "8px",
-                padding: "12px",
+                background: focusedIndex === virtualRow.index ? theme.itemFocus : item.is_favorite ? (theme.isDark ? "#2a2518" : "#fffdf5") : "transparent",
+                borderBottom: `1px solid ${theme.itemBorder}`,
+                borderLeft: item.is_favorite ? "3px solid #f59e0b" : "3px solid transparent",
+                padding: "8px 12px",
               }}
               onClick={() => handlePaste(item)}
               onContextMenu={(e) => {
@@ -125,47 +131,17 @@ export function ClipboardList() {
                 setCtxMenu({ x: e.clientX, y: e.clientY, item });
               }}
             >
-              <div className="flex items-start gap-3 pr-6">
-                <span className="text-xl shrink-0">{getContentTypeIcon(item.content_type)}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-gray-800 text-sm leading-relaxed line-clamp-2">
-                    {truncateText(item.preview, 120)}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1.5">
-                    <span className="text-xs text-gray-400">{formatTimeAgo(item.created_at)}</span>
-                  </div>
-                </div>
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="flex-1 text-[13px] leading-snug truncate" style={{ color: theme.itemText }}>
+                  {truncateText(item.preview, 80)}
+                </p>
+                <span className="shrink-0 text-[11px] whitespace-nowrap" style={{ color: theme.itemTime }}>{formatTimeAgo(item.created_at)}</span>
               </div>
-
-              {/* Favorite star */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleFavorite(item.id);
-                }}
-                className="absolute right-1 top-1 w-6 h-6 flex items-center justify-center text-lg transition-colors"
-                title={item.is_favorite ? "取消收藏" : "收藏"}
-              >
-                {item.is_favorite ? "⭐" : "☆"}
-              </button>
-
-              {/* Delete button */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteItem(item.id);
-                }}
-                className="absolute right-1 bottom-1 w-6 h-6 flex items-center justify-center text-gray-300 hover:text-red-500 transition-colors text-lg font-bold"
-                title="删除"
-              >
-                ×
-              </button>
             </div>
           );
         })}
       </div>
 
-      {/* Context Menu */}
       {ctxMenu && (
         <ContextMenu
           x={ctxMenu.x}

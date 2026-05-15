@@ -2,6 +2,7 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use crate::settings::Settings;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
@@ -68,6 +69,30 @@ impl Database {
         let db = Database { conn };
         db.init_schema()?;
         Ok(db)
+    }
+
+    pub fn load_settings(&self) -> Settings {
+        let get_setting = |key: &str, default: &str| -> String {
+            self.conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| default.to_string())
+        };
+
+        Settings {
+            max_history_size: get_setting("max_history_size", "500").parse().unwrap_or(500),
+            auto_start: get_setting("auto_start", "false") == "true",
+            minimize_to_tray: get_setting("minimize_to_tray", "true") == "true",
+            global_shortcut: get_setting("global_shortcut", "Ctrl+Shift+V"),
+            sync_enabled: get_setting("sync_enabled", "false") == "true",
+            sync_server: {
+                let val = get_setting("sync_server", "");
+                if val.is_empty() { None } else { Some(val) }
+            },
+            theme: get_setting("theme", "dark"),
+        }
     }
 
     fn init_schema(&self) -> Result<()> {
@@ -300,6 +325,10 @@ impl Database {
             params![to_delete],
         )?;
         let deleted = self.conn.changes() as usize;
+        self.conn.execute(
+            "DELETE FROM clipboard_fts WHERE rowid NOT IN (SELECT rowid FROM clipboard_items)",
+            [],
+        )?;
         Ok(deleted)
     }
 

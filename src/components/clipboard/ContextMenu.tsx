@@ -21,11 +21,12 @@ export function ContextMenu({ x, y, onClose, items }: ContextMenuProps) {
         onContextMenu={(e) => { e.preventDefault(); onClose(); }}
       />
       <div
-        className="fixed z-50 rounded-lg py-1 shadow-lg border border-gray-200 min-w-[140px]"
+        className="fixed z-50 rounded-lg py-1 shadow-lg border min-w-[140px]"
         style={{
           left: x,
           top: y,
           background: "#ffffff",
+          borderColor: "#e5e7eb",
         }}
       >
         {items.map((item, i) => (

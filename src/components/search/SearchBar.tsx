@@ -1,7 +1,11 @@
 import { useState, useCallback, useRef } from "react";
 import { useStore } from "../../store";
 
-export function SearchBar() {
+interface SearchBarProps {
+  theme: Record<string, string>;
+}
+
+export function SearchBar({ theme }: SearchBarProps) {
   const { searchQuery, setSearchQuery, search } = useStore();
   const [localQuery, setLocalQuery] = useState(searchQuery);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -17,23 +21,24 @@ export function SearchBar() {
   );
 
   return (
-    <div className="relative" style={{ margin: '10px' }}>
+    <div className="relative">
       <input
         type="text"
         value={localQuery}
         onChange={(e) => handleSearch(e.target.value)}
         placeholder="搜索剪贴历史..."
-        className="w-full rounded-lg px-4 py-2.5 text-sm text-gray-800 placeholder-gray-400 transition-all duration-200"
+        className="w-full rounded-lg px-4 py-2 text-sm transition-all duration-200"
         style={{
-          background: '#ffffff',
-          border: '1px solid #d1d5db',
-          padding: '10px',
+          background: theme.searchBg,
+          color: theme.searchText,
+          border: `1px solid ${theme.searchBorder}`,
         }}
       />
       {localQuery && (
         <button
           onClick={() => handleSearch("")}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+          className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
+          style={{ color: theme.searchPlaceholder }}
         >
           ✕
         </button>
