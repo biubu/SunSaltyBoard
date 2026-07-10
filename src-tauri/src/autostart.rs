@@ -83,6 +83,14 @@ fn setup_autostart_windows(enabled: bool) {
 }
 
 #[cfg(target_os = "linux")]
+fn desktop_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+#[cfg(target_os = "linux")]
 fn setup_autostart_linux(enabled: bool) {
     let home = match env::var("HOME") {
         Ok(h) => PathBuf::from(h),
@@ -109,6 +117,11 @@ fn setup_autostart_linux(enabled: bool) {
             }
         };
 
+        // Quote Exec= value so spaces and special chars are preserved,
+        // and escape reserved chars per the desktop-entry spec.
+        let escaped_path = desktop_escape(&exe_path);
+        let quoted_exec = format!("\"{}\"", escaped_path);
+
         let desktop_entry = format!(
             "[Desktop Entry]\n\
              Type=Application\n\
@@ -118,7 +131,7 @@ fn setup_autostart_linux(enabled: bool) {
              Hidden=false\n\
              NoDisplay=false\n\
              X-GNOME-Autostart-enabled=true\n",
-            exe_path
+            quoted_exec
         );
 
         if let Err(e) = fs::write(&desktop_file, desktop_entry) {
@@ -138,6 +151,15 @@ fn setup_autostart_linux(enabled: bool) {
 }
 
 #[cfg(target_os = "macos")]
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+#[cfg(target_os = "macos")]
 fn setup_autostart_macos(enabled: bool) {
     let home = match env::var("HOME") {
         Ok(h) => std::path::PathBuf::from(h),
@@ -146,6 +168,7 @@ fn setup_autostart_macos(enabled: bool) {
 
     let launch_agents_dir = home.join("Library").join("LaunchAgents");
     let plist_path = launch_agents_dir.join("com.sunSaltyBoard.desktop.plist");
+    let plist_label = "com.sunSaltyBoard.desktop";
 
     if enabled {
         let exe_path = match env::current_exe() {
@@ -164,7 +187,7 @@ fn setup_autostart_macos(enabled: bool) {
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.sunSaltyBoard.desktop</string>
+    <string>{}</string>
     <key>ProgramArguments</key>
     <array>
         <string>{}</string>
@@ -175,7 +198,8 @@ fn setup_autostart_macos(enabled: bool) {
     <false/>
 </dict>
 </plist>"#,
-            exe_path
+            xml_escape(plist_label),
+            xml_escape(&exe_path)
         );
 
         if let Err(e) = std::fs::write(&plist_path, plist) {
@@ -184,6 +208,12 @@ fn setup_autostart_macos(enabled: bool) {
             log::info!("Auto-start enabled on macOS");
         }
     } else if plist_path.exists() {
+        // Unload from launchd before removing the file so launchd doesn't
+        // continue holding a stale reference.
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", "-w"])
+            .arg(&plist_path)
+            .output();
         if let Err(e) = std::fs::remove_file(&plist_path) {
             log::error!("Failed to remove plist file: {}", e);
         } else {

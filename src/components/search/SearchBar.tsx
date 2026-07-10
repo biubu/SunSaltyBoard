@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useStore } from "../../store";
 
 interface SearchBarProps {
@@ -9,6 +9,12 @@ export function SearchBar({ theme }: SearchBarProps) {
   const { searchQuery, setSearchQuery, search } = useStore();
   const [localQuery, setLocalQuery] = useState(searchQuery);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const handleSearch = useCallback(
     (value: string) => {

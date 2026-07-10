@@ -4,11 +4,13 @@ use std::thread;
 use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
+use sha2::{Digest, Sha256};
 
 use crate::database::ClipboardItem;
 use crate::AppState;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
@@ -48,6 +50,16 @@ pub struct ClipboardManager {
     last_text: Arc<Mutex<String>>,
     last_image: Arc<Mutex<String>>,
     last_html: Arc<Mutex<String>>,
+    /// Recent values we wrote to the OS clipboard ourselves, used to suppress
+    /// the monitor from re-capturing our own paste actions.
+    self_writes: Arc<Mutex<Vec<SelfWrite>>>,
+}
+
+#[derive(Clone)]
+struct SelfWrite {
+    content_type: String,
+    content: String,
+    expires_at_ms: u128,
 }
 
 impl ClipboardManager {
@@ -57,6 +69,25 @@ impl ClipboardManager {
             last_text: Arc::new(Mutex::new(String::new())),
             last_image: Arc::new(Mutex::new(String::new())),
             last_html: Arc::new(Mutex::new(String::new())),
+            self_writes: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Record a clipboard write performed by this app so the monitor thread
+    /// can ignore the resulting echo. Entries auto-expire after 5 seconds.
+    pub fn record_self_write(&self, content_type: &str, content: &str) {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let entry = SelfWrite {
+            content_type: content_type.to_string(),
+            content: content.to_string(),
+            expires_at_ms: now_ms + 5_000,
+        };
+        if let Ok(mut writes) = self.self_writes.lock() {
+            writes.retain(|w| w.expires_at_ms > now_ms);
+            writes.push(entry);
         }
     }
 
@@ -65,6 +96,7 @@ impl ClipboardManager {
         let last_text = self.last_text.clone();
         let last_image = self.last_image.clone();
         let last_html = self.last_html.clone();
+        let self_writes = self.self_writes.clone();
 
         running.store(true, Ordering::SeqCst);
 
@@ -83,23 +115,29 @@ impl ClipboardManager {
 
                 if let Ok(image) = clipboard.get_image() {
                     let rgba_b64 = STANDARD.encode(&image.bytes);
-                    let image_key = format!("{}x{}:{}", image.width, image.height, &rgba_b64[..rgba_b64.len().min(64)]);
+                    let mut hasher = Sha256::new();
+                    hasher.update(&image.bytes);
+                    let image_hash = format!("{:x}", hasher.finalize());
+                    let image_key = format!("{}x{}:{}", image.width, image.height, image_hash);
                     let mut last = last_image.lock().unwrap();
                     if *last != image_key {
-                        let metadata = serde_json::json!({
-                            "width": image.width,
-                            "height": image.height,
-                            "format": "rgba"
-                        }).to_string();
+                        if !is_self_write(&self_writes, "image", &rgba_b64) {
+                            let metadata = serde_json::json!({
+                                "width": image.width,
+                                "height": image.height,
+                                "format": "rgba",
+                                "sha256": image_hash,
+                            }).to_string();
 
-                        let event = ClipboardEvent {
-                            content_type: ClipboardContentType::Image.as_str().to_string(),
-                            content: rgba_b64.clone(),
-                            preview: format!("Image {}x{}", image.width, image.height),
-                            metadata: Some(metadata),
-                        };
+                            let event = ClipboardEvent {
+                                content_type: ClipboardContentType::Image.as_str().to_string(),
+                                content: rgba_b64.clone(),
+                                preview: format!("Image {}x{}", image.width, image.height),
+                                metadata: Some(metadata),
+                            };
 
-                        emit_and_store(&app_handle, &event);
+                            emit_and_store(&app_handle, &event);
+                        }
                         *last = image_key;
                         got_content = true;
                     }
@@ -108,16 +146,18 @@ impl ClipboardManager {
                 if let Ok(html) = clipboard.get().html() {
                     let mut last = last_html.lock().unwrap();
                     if *last != html {
-                        let preview = strip_html_tags(&html).chars().take(200).collect::<String>();
+                        if !is_self_write(&self_writes, "html", &html) {
+                            let preview = strip_html_tags(&html).chars().take(200).collect::<String>();
 
-                        let event = ClipboardEvent {
-                            content_type: ClipboardContentType::Html.as_str().to_string(),
-                            content: html.clone(),
-                            preview,
-                            metadata: None,
-                        };
+                            let event = ClipboardEvent {
+                                content_type: ClipboardContentType::Html.as_str().to_string(),
+                                content: html.clone(),
+                                preview,
+                                metadata: None,
+                            };
 
-                        emit_and_store(&app_handle, &event);
+                            emit_and_store(&app_handle, &event);
+                        }
                         *last = html;
                         got_content = true;
                     }
@@ -126,15 +166,17 @@ impl ClipboardManager {
                 if let Ok(text) = clipboard.get_text() {
                     let mut last = last_text.lock().unwrap();
                     if *last != text {
-                        let preview = text.chars().take(200).collect::<String>();
-                        let event = ClipboardEvent {
-                            content_type: ClipboardContentType::Text.as_str().to_string(),
-                            content: text.clone(),
-                            preview,
-                            metadata: None,
-                        };
+                        if !is_self_write(&self_writes, "text", &text) {
+                            let preview = text.chars().take(200).collect::<String>();
+                            let event = ClipboardEvent {
+                                content_type: ClipboardContentType::Text.as_str().to_string(),
+                                content: text.clone(),
+                                preview,
+                                metadata: None,
+                            };
 
-                        emit_and_store(&app_handle, &event);
+                            emit_and_store(&app_handle, &event);
+                        }
                         *last = text;
                         got_content = true;
                     }
@@ -156,6 +198,24 @@ impl ClipboardManager {
     }
 }
 
+fn is_self_write(writes: &Arc<Mutex<Vec<SelfWrite>>>, content_type: &str, content: &str) -> bool {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let Ok(mut writes) = writes.lock() else { return false };
+    writes.retain(|w| w.expires_at_ms > now_ms);
+    if let Some(pos) = writes
+        .iter()
+        .position(|w| w.content_type == content_type && w.content == content)
+    {
+        writes.remove(pos);
+        true
+    } else {
+        false
+    }
+}
+
 fn strip_html_tags(html: &str) -> String {
     let mut result = String::new();
     let mut inside_tag = false;
@@ -174,11 +234,7 @@ fn strip_html_tags(html: &str) -> String {
 fn emit_and_store(app_handle: &AppHandle, event: &ClipboardEvent) {
     if let Some(state) = app_handle.try_state::<AppState>() {
         if let Ok(db) = state.db.lock() {
-            let dedup_key = if event.content_type == "image" {
-                event.preview.clone()
-            } else {
-                event.content.clone()
-            };
+            let dedup_key = event.content.clone();
 
             if let Ok(Some(existing_id)) = db.find_by_content(&dedup_key) {
                 if let Err(e) = db.update_item_timestamp(&existing_id) {

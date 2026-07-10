@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import type { Settings, UpdateInfo } from "../../types";
 import { getAppVersion, checkUpdate } from "../../services/api";
 
@@ -36,6 +36,8 @@ function SectionTitle({ title, theme }: { title: string; theme: Record<string, s
   );
 }
 
+const DEBOUNCE_MS = 400;
+
 export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing, theme }: SettingsPanelProps) {
   const inputStyle: React.CSSProperties = {
     background: theme.settingsInputBg,
@@ -46,6 +48,51 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
   const [appVersion, setAppVersion] = useState("");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  const [draft, setDraft] = useState<Settings>(settings);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  const commitDraft = useCallback(
+    (next: Settings) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onUpdate(next);
+      }, DEBOUNCE_MS);
+    },
+    [onUpdate]
+  );
+
+  const updateDraft = useCallback(
+    (patch: Partial<Settings>) => {
+      setDraft((prev) => {
+        const next = { ...prev, ...patch };
+        commitDraft(next);
+        return next;
+      });
+    },
+    [commitDraft]
+  );
+
+  // Apply settings immediately (no debounce) - used for checkboxes and selects
+  // where a single click represents the user's intent.
+  const applyImmediate = useCallback(
+    (next: Settings) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setDraft(next);
+      onUpdate(next);
+    },
+    [onUpdate]
+  );
 
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(() => setAppVersion("?"));
@@ -71,8 +118,9 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
         <SettingRow label="历史记录上限" theme={theme}>
           <input
             type="number"
-            value={settings.max_history_size}
-            onChange={(e) => onUpdate({ ...settings, max_history_size: Number(e.target.value) })}
+            value={draft.max_history_size}
+            onChange={(e) => updateDraft({ max_history_size: Number(e.target.value) })}
+            onBlur={() => commitDraft(draft)}
             className="w-20 px-2 py-1 rounded text-sm text-right"
             style={inputStyle}
             min={50}
@@ -82,8 +130,9 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
         <SettingRow label="全局快捷键" theme={theme}>
           <input
             type="text"
-            value={settings.global_shortcut}
-            onChange={(e) => onUpdate({ ...settings, global_shortcut: e.target.value })}
+            value={draft.global_shortcut}
+            onChange={(e) => updateDraft({ global_shortcut: e.target.value })}
+            onBlur={() => commitDraft(draft)}
             className="w-32 px-2 py-1 rounded text-sm text-right font-mono"
             style={inputStyle}
           />
@@ -96,16 +145,16 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
         <SettingRow label="开机自启" theme={theme}>
           <input
             type="checkbox"
-            checked={settings.auto_start}
-            onChange={(e) => onUpdate({ ...settings, auto_start: e.target.checked })}
+            checked={draft.auto_start}
+            onChange={(e) => applyImmediate({ ...draft, auto_start: e.target.checked })}
             className="accent-blue-500"
           />
         </SettingRow>
         <SettingRow label="最小化到托盘" theme={theme}>
           <input
             type="checkbox"
-            checked={settings.minimize_to_tray}
-            onChange={(e) => onUpdate({ ...settings, minimize_to_tray: e.target.checked })}
+            checked={draft.minimize_to_tray}
+            onChange={(e) => applyImmediate({ ...draft, minimize_to_tray: e.target.checked })}
             className="accent-blue-500"
           />
         </SettingRow>
@@ -116,8 +165,8 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
         <SectionTitle title="外观" theme={theme} />
         <SettingRow label="主题" theme={theme}>
           <select
-            value={settings.theme}
-            onChange={(e) => onUpdate({ ...settings, theme: e.target.value })}
+            value={draft.theme}
+            onChange={(e) => applyImmediate({ ...draft, theme: e.target.value })}
             className="px-2 py-1 rounded text-sm"
             style={inputStyle}
           >
@@ -133,25 +182,26 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
         <SettingRow label="启用同步" theme={theme}>
           <input
             type="checkbox"
-            checked={settings.sync_enabled}
-            onChange={(e) => onUpdate({ ...settings, sync_enabled: e.target.checked })}
+            checked={draft.sync_enabled}
+            onChange={(e) => applyImmediate({ ...draft, sync_enabled: e.target.checked })}
             className="accent-blue-500"
           />
         </SettingRow>
-        {settings.sync_enabled && (
+        {draft.sync_enabled && (
           <div className="mt-2 space-y-2">
             <input
               type="text"
               placeholder="服务器地址"
-              value={settings.sync_server || ""}
-              onChange={(e) => onUpdate({ ...settings, sync_server: e.target.value || null })}
+              value={draft.sync_server || ""}
+              onChange={(e) => updateDraft({ sync_server: e.target.value || null })}
+              onBlur={() => commitDraft(draft)}
               className="w-full px-2 py-1 rounded text-sm"
               style={inputStyle}
             />
             <div className="flex items-center gap-2">
               <button
                 onClick={onSync}
-                disabled={syncing || !settings.sync_server}
+                disabled={syncing || !draft.sync_server}
                 className="px-3 py-1 rounded text-xs text-white disabled:opacity-40 transition-opacity"
                 style={{ background: "#3b82f6" }}
               >
@@ -179,8 +229,9 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             <input
               type="text"
               placeholder="https://example.com/updates"
-              value={settings.update_server_url || ""}
-              onChange={(e) => onUpdate({ ...settings, update_server_url: e.target.value || null })}
+              value={draft.update_server_url || ""}
+              onChange={(e) => updateDraft({ update_server_url: e.target.value || null })}
+              onBlur={() => commitDraft(draft)}
               className="w-40 px-2 py-1 rounded text-sm text-right"
               style={inputStyle}
             />
@@ -188,7 +239,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
           <div className="flex items-center gap-2 pt-1">
             <button
               onClick={handleCheckUpdate}
-              disabled={checkingUpdate || !settings.update_server_url}
+              disabled={checkingUpdate || !draft.update_server_url}
               className="px-3 py-1 rounded text-xs text-white disabled:opacity-40 transition-opacity"
               style={{ background: "#8b5cf6" }}
             >

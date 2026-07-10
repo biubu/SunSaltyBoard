@@ -2,7 +2,16 @@ use crate::database::{ClipboardItem, Group, Hotkey, Tag};
 use crate::settings::Settings;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tauri::{command, AppHandle, Manager, State};
+
+/// Shared HTTP client with connection pooling.
+static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> = once_cell::sync::Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("failed to build reqwest client")
+});
 
 #[command]
 pub fn get_clipboard_history(
@@ -33,12 +42,32 @@ fn simulate_ctrl_v() -> Result<(), String> {
         use std::thread;
         use std::time::Duration;
         unsafe {
-            use windows::Win32::UI::Input::KeyboardAndMouse::{keybd_event, VK_LCONTROL, VK_V, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS};
+            use windows::Win32::UI::Input::KeyboardAndMouse::{
+                SendInput, INPUT, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+                VK_CONTROL, VK_V,
+            };
 
-            keybd_event(VK_LCONTROL.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
-            keybd_event(VK_V.0 as u8, 0, KEYBD_EVENT_FLAGS(0), 0);
-            keybd_event(VK_V.0 as u8, 0, KEYEVENTF_KEYUP, 0);
-            keybd_event(VK_LCONTROL.0 as u8, 0, KEYEVENTF_KEYUP, 0);
+            fn vk_input(vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+                let mut input = INPUT::default();
+                input.r#type = INPUT_KEYBOARD;
+                input.Anonymous.ki.wVk = vk;
+                input.Anonymous.ki.wScan = 0;
+                input.Anonymous.ki.dwFlags = flags;
+                input.Anonymous.ki.time = 0;
+                input.Anonymous.ki.dwExtraInfo = 0;
+                input
+            }
+
+            let down_ctrl = vk_input(VK_CONTROL, KEYBD_EVENT_FLAGS(0));
+            let down_v = vk_input(VK_V, KEYBD_EVENT_FLAGS(0));
+            let up_v = vk_input(VK_V, KEYEVENTF_KEYUP);
+            let up_ctrl = vk_input(VK_CONTROL, KEYEVENTF_KEYUP);
+
+            let inputs = [down_ctrl, down_v, up_v, up_ctrl];
+            let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+            if sent as usize != inputs.len() {
+                log::warn!("SendInput only delivered {} of {} events", sent, inputs.len());
+            }
         }
         thread::sleep(Duration::from_millis(200));
     }
@@ -55,7 +84,8 @@ fn simulate_ctrl_v() -> Result<(), String> {
             .map_err(|e| format!("enigo init: {}", e))?;
         enigo.key(enigo::Key::Control, enigo::Direction::Press)
             .map_err(|e| format!("failed key_down control: {}", e))?;
-        let _ = enigo.key(enigo::Key::Unicode('v'), enigo::Direction::Click);
+        enigo.key(enigo::Key::Unicode('v'), enigo::Direction::Click)
+            .map_err(|e| format!("failed key_down v: {}", e))?;
         enigo.key(enigo::Key::Control, enigo::Direction::Release)
             .map_err(|e| format!("failed key_up control: {}", e))?;
 
@@ -66,16 +96,23 @@ fn simulate_ctrl_v() -> Result<(), String> {
 }
 
 #[command]
-pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
+pub fn paste_item(state: State<'_, AppState>, app: AppHandle, item: ClipboardItem) -> Result<(), String> {
     log::info!("Pasting item: {} of type {}", item.id, item.content_type);
 
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let original = clipboard.get_text().ok();
 
-    if item.content_type == "text" {
-        clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
+    let payload: String = if item.content_type == "text" {
+        item.content.clone()
     } else {
-        clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
+        item.preview.clone()
+    };
+
+    clipboard.set_text(&payload).map_err(|e| e.to_string())?;
+    state.clipboard_manager.record_self_write("text", &payload);
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
     }
 
     simulate_ctrl_v()?;
@@ -88,17 +125,20 @@ pub fn paste_item(item: ClipboardItem) -> Result<(), String> {
 }
 
 #[command]
-pub fn paste_to_active(app: AppHandle, item: ClipboardItem) -> Result<(), String> {
+pub fn paste_to_active(state: State<'_, AppState>, app: AppHandle, item: ClipboardItem) -> Result<(), String> {
     log::info!("Paste to active: {} of type {}", item.id, item.content_type);
 
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     let original = clipboard.get_text().ok();
 
-    if item.content_type == "text" {
-        clipboard.set_text(&item.content).map_err(|e| e.to_string())?;
+    let payload: String = if item.content_type == "text" {
+        item.content.clone()
     } else {
-        clipboard.set_text(&item.preview).map_err(|e| e.to_string())?;
-    }
+        item.preview.clone()
+    };
+
+    clipboard.set_text(&payload).map_err(|e| e.to_string())?;
+    state.clipboard_manager.record_self_write("text", &payload);
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
@@ -228,11 +268,26 @@ pub fn register_hotkey(
 ) -> Result<(), String> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-    let app_handle = state.app_handle.lock().map_err(|e| e.to_string())?;
-    let app_handle = app_handle.as_ref().ok_or("App handle not available")?.clone();
+    let app_handle = {
+        let guard = state.app_handle.lock().map_err(|e| e.to_string())?;
+        guard.as_ref().ok_or("App handle not available")?.clone()
+    };
 
     let shortcut: Shortcut = key_combination.parse()
         .map_err(|e| format!("Invalid shortcut format: {}", e))?;
+
+    {
+        let mut current_shortcut = state.current_shortcut.lock().map_err(|e| e.to_string())?;
+        if let Some(old) = current_shortcut.as_ref() {
+            if old == &shortcut {
+                return Ok(());
+            }
+            if let Err(e) = app_handle.global_shortcut().unregister(old.clone()) {
+                log::warn!("Failed to unregister previous shortcut: {}", e);
+            }
+        }
+        *current_shortcut = None;
+    }
 
     let app_handle_clone = app_handle.clone();
     if let Err(e) = app_handle.global_shortcut().on_shortcut(shortcut.clone(), move |_app, _shortcut, event| {
@@ -285,38 +340,62 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
         settings.update_server_url = Some(update_server);
     }
 
-    // Configure sync manager with loaded settings
-    if settings.sync_enabled {
-        state.sync_manager.configure(settings.sync_server.clone());
-    }
-
     Ok(settings)
 }
 
 #[command]
 pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.set_setting("max_history_size", &settings.max_history_size.to_string())
-        .map_err(|e| e.to_string())?;
-    db.set_setting("auto_start", &settings.auto_start.to_string())
-        .map_err(|e| e.to_string())?;
-    db.set_setting("minimize_to_tray", &settings.minimize_to_tray.to_string())
-        .map_err(|e| e.to_string())?;
-    db.set_setting("global_shortcut", &settings.global_shortcut)
-        .map_err(|e| e.to_string())?;
-    db.set_setting("sync_enabled", &settings.sync_enabled.to_string())
-        .map_err(|e| e.to_string())?;
-    if let Some(ref server) = settings.sync_server {
-        db.set_setting("sync_server", server)
+    // Snapshot old settings BEFORE writing
+    let old = state.settings.lock().map_err(|e| e.to_string())?.clone();
+
+    // 1. Persist to DB
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.set_setting("max_history_size", &settings.max_history_size.to_string())
             .map_err(|e| e.to_string())?;
-    }
-    db.set_setting("theme", &settings.theme).map_err(|e| e.to_string())?;
-    if let Some(ref url) = settings.update_server_url {
-        db.set_setting("update_server_url", url)
+        db.set_setting("auto_start", &settings.auto_start.to_string())
             .map_err(|e| e.to_string())?;
+        db.set_setting("minimize_to_tray", &settings.minimize_to_tray.to_string())
+            .map_err(|e| e.to_string())?;
+        db.set_setting("global_shortcut", &settings.global_shortcut)
+            .map_err(|e| e.to_string())?;
+        db.set_setting("sync_enabled", &settings.sync_enabled.to_string())
+            .map_err(|e| e.to_string())?;
+        if let Some(ref server) = settings.sync_server {
+            db.set_setting("sync_server", server)
+                .map_err(|e| e.to_string())?;
+        }
+        db.set_setting("theme", &settings.theme).map_err(|e| e.to_string())?;
+        if let Some(ref url) = settings.update_server_url {
+            db.set_setting("update_server_url", url)
+                .map_err(|e| e.to_string())?;
+        }
     }
 
-    // Also update in-memory settings
+    // 2. Apply side-effects
+
+    // auto_start -> toggle OS autostart
+    if old.auto_start != settings.auto_start {
+        crate::autostart::setup_autostart(settings.auto_start);
+    }
+
+    // global_shortcut -> re-register OS hotkey
+    if old.global_shortcut != settings.global_shortcut {
+        if let Err(e) = register_hotkey(state.clone(), settings.global_shortcut.clone()) {
+            log::error!("Failed to apply new shortcut: {}", e);
+        }
+    }
+
+    // sync -> reconfigure sync manager
+    if old.sync_enabled != settings.sync_enabled || old.sync_server != settings.sync_server {
+        if settings.sync_enabled {
+            state.sync_manager.configure(settings.sync_server.clone());
+        } else {
+            state.sync_manager.configure(None);
+        }
+    }
+
+    // 3. Update in-memory copy
     let mut state_settings = state.settings.lock().map_err(|e| e.to_string())?;
     *state_settings = settings;
 
@@ -428,17 +507,30 @@ pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo, Stri
 
     let endpoint = format!("{}/update.json?current={}", server_url.trim_end_matches('/'), current_version);
 
-    match reqwest::get(&endpoint).await {
+    match HTTP_CLIENT
+        .get(&endpoint)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+    {
         Ok(resp) => {
-            if let Ok(info) = resp.json::<UpdateInfo>().await {
-                Ok(info)
-            } else {
-                Ok(UpdateInfo {
+            let status = resp.status();
+            if !status.is_success() {
+                return Ok(UpdateInfo {
+                    latest_version: None,
+                    download_url: None,
+                    release_notes: None,
+                    error: Some(format!("服务器返回状态 {}", status.as_u16())),
+                });
+            }
+            match resp.json::<UpdateInfo>().await {
+                Ok(info) => Ok(info),
+                Err(_) => Ok(UpdateInfo {
                     latest_version: None,
                     download_url: None,
                     release_notes: None,
                     error: Some("无法解析更新响应".to_string()),
-                })
+                }),
             }
         }
         Err(e) => Ok(UpdateInfo {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./store";
 import { SearchBar } from "./components/search/SearchBar";
@@ -8,9 +8,10 @@ import { SettingsPanel } from "./components/settings/SettingsPanel";
 import type { ClipboardItem } from "./types";
 
 const GROUP_COLORS = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4"];
+const CLIPBOARD_RELOAD_DEBOUNCE_MS = 150;
 
 function App() {
-  const { loadHistory, loadSettings, loadGroups, settings, updateSettings, error, clearError, groups, selectedGroup, setSelectedGroup, createGroup, deleteGroup } = useStore();
+  const { loadHistory, loadSettings, loadGroups, settings, updateSettings, error, clearError, groups, selectedGroup, setSelectedGroup, createGroup, deleteGroup, searchQuery } = useStore();
   const [showSettings, setShowSettings] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string>("");
   const [syncing, setSyncing] = useState(false);
@@ -20,17 +21,40 @@ function App() {
     loadSettings();
     loadGroups();
 
-    let unlistenFn: (() => void) | undefined;
+    let unlistenFn: UnlistenFn | undefined;
+    let debounceTimer: number | undefined;
+    let cancelled = false;
 
-    listen<ClipboardItem>("clipboard-changed", () => {
-      loadHistory();
-    }).then((unlisten) => {
-      unlistenFn = unlisten;
-    });
+    const scheduleReload = () => {
+      if (debounceTimer !== undefined) {
+        window.clearTimeout(debounceTimer);
+      }
+      // Skip reload if user is actively searching; the search query will
+      // re-run via the debounced SearchBar.
+      if (searchQuery.trim()) return;
+      debounceTimer = window.setTimeout(() => {
+        loadHistory();
+      }, CLIPBOARD_RELOAD_DEBOUNCE_MS);
+    };
+
+    listen<ClipboardItem>("clipboard-changed", scheduleReload)
+      .then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+        } else {
+          unlistenFn = unlisten;
+        }
+      })
+      .catch((e) => {
+        console.error("Failed to listen for clipboard-changed:", e);
+      });
 
     return () => {
+      cancelled = true;
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       unlistenFn?.();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const hideWindow = async () => {

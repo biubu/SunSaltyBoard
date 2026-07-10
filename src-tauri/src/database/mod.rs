@@ -57,6 +57,13 @@ impl Database {
         log::info!("Database path: {:?}", db_path);
 
         let conn = Connection::open(&db_path)?;
+        // WAL mode improves concurrency between the monitor thread and Tauri commands.
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;\
+             PRAGMA synchronous = NORMAL;\
+             PRAGMA busy_timeout = 5000;\
+             PRAGMA foreign_keys = ON;",
+        )?;
         let db = Database { conn };
         db.init_schema()?;
         Ok(db)
@@ -215,17 +222,34 @@ impl Database {
         Ok(items)
     }
 
-    /// Sanitize FTS5 query to prevent syntax errors from special characters
-    fn sanitize_fts_query(raw: &str) -> String {
-        // Escape double quotes inside the query
-        let escaped = raw.replace('"', "\"\"");
-        // Wrap in quotes to treat as literal phrase search
-        // This prevents FTS5 special chars (*, ^, (, ), etc.) from causing syntax errors
-        format!("\"{}\"", escaped)
+    /// Build an FTS5 query from raw user input.
+    /// Tokenizes the input and builds a query that matches any token as a prefix,
+    /// e.g. "hello world" becomes `hello* OR world*` so partial words match.
+    /// Returns None when the input contains no usable tokens.
+    fn build_fts_query(raw: &str) -> Option<String> {
+        let mut tokens: Vec<String> = Vec::new();
+        for raw_token in raw.split_whitespace() {
+            // Strip FTS5 operators/special chars from each token; keep letters/digits.
+            let cleaned: String = raw_token
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if cleaned.is_empty() {
+                continue;
+            }
+            tokens.push(format!("{}*", cleaned));
+        }
+        if tokens.is_empty() {
+            None
+        } else {
+            Some(tokens.join(" OR "))
+        }
     }
 
     pub fn search_clipboard(&self, query: &str, limit: i32) -> Result<Vec<ClipboardItem>> {
-        let safe_query = Self::sanitize_fts_query(query);
+        let Some(safe_query) = Self::build_fts_query(query) else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare(
             "SELECT c.id, c.content_type, c.content, c.preview, c.group_id, c.created_at, c.is_favorite, c.metadata
              FROM clipboard_items c
@@ -319,11 +343,8 @@ impl Database {
             )",
             params![to_delete],
         )?;
+        // FTS index is kept in sync via the `clipboard_ad` AFTER DELETE trigger.
         let deleted = self.conn.changes() as usize;
-        self.conn.execute(
-            "DELETE FROM clipboard_fts WHERE rowid NOT IN (SELECT rowid FROM clipboard_items)",
-            [],
-        )?;
         Ok(deleted)
     }
 

@@ -203,6 +203,14 @@ pub fn run() {
             let db = Database::new(&app_handle).expect("Failed to initialize database");
             let settings = Arc::new(Mutex::new(db.load_settings()));
 
+            let sync_manager = Arc::new(SyncManager::new());
+            {
+                let s = settings.lock().unwrap();
+                if s.sync_enabled {
+                    sync_manager.configure(s.sync_server.clone());
+                }
+            }
+
             // Setup auto-start based on settings
             {
                 let settings_guard = settings.lock().unwrap();
@@ -210,8 +218,6 @@ pub fn run() {
             }
 
             let clipboard_manager = Arc::new(ClipboardManager::new());
-
-            let sync_manager = Arc::new(SyncManager::new());
 
             app.manage(AppState {
                 db: Arc::new(Mutex::new(db)),
