@@ -1,4 +1,6 @@
-import type { Settings } from "../../types";
+import { useState, useEffect } from "react";
+import type { Settings, UpdateInfo } from "../../types";
+import { getAppVersion, checkUpdate } from "../../services/api";
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -9,6 +11,31 @@ interface SettingsPanelProps {
   theme: Record<string, string>;
 }
 
+function SettingRow({
+  label,
+  theme,
+  children,
+}: {
+  label: string;
+  theme: Record<string, string>;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex items-center justify-between text-sm min-h-[32px]" style={{ color: theme.settingsLabel }}>
+      <span className="shrink-0 mr-3">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function SectionTitle({ title, theme }: { title: string; theme: Record<string, string> }) {
+  return (
+    <div className="text-xs font-semibold uppercase tracking-wider mb-2 mt-1 first:mt-0" style={{ color: theme.settingsTitle }}>
+      {title}
+    </div>
+  );
+}
+
 export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing, theme }: SettingsPanelProps) {
   const inputStyle: React.CSSProperties = {
     background: theme.settingsInputBg,
@@ -16,12 +43,32 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
     border: `1px solid ${theme.settingsInputBorder}`,
   };
 
+  const [appVersion, setAppVersion] = useState("");
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
+  useEffect(() => {
+    getAppVersion().then(setAppVersion).catch(() => setAppVersion("?"));
+  }, []);
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateInfo(null);
+    try {
+      const info = await checkUpdate();
+      setUpdateInfo(info);
+    } catch {
+      setUpdateInfo({ latest_version: null, download_url: null, release_notes: null, error: "检查更新失败" });
+    }
+    setCheckingUpdate(false);
+  };
+
   return (
-    <div className="mx-3 mt-1 p-4 rounded-lg border shrink-0" style={{ background: theme.settingsBg, borderColor: theme.settingsBorder }}>
-      <h3 className="text-sm font-semibold mb-3" style={{ color: theme.settingsTitle }}>设置</h3>
-      <div className="space-y-2.5">
-        <label className="flex items-center justify-between text-sm" style={{ color: theme.settingsLabel }}>
-          历史记录上限
+    <div className="mx-3 mt-1 p-3 rounded-lg border shrink-0 space-y-3" style={{ background: theme.settingsBg, borderColor: theme.settingsBorder }}>
+      {/* General */}
+      <div>
+        <SectionTitle title="通用" theme={theme} />
+        <SettingRow label="历史记录上限" theme={theme}>
           <input
             type="number"
             value={settings.max_history_size}
@@ -31,35 +78,43 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             min={50}
             max={5000}
           />
-        </label>
-        <label className="flex items-center justify-between text-sm" style={{ color: theme.settingsLabel }}>
-          开机自启
-          <input
-            type="checkbox"
-            checked={settings.auto_start}
-            onChange={(e) => onUpdate({ ...settings, auto_start: e.target.checked })}
-          />
-        </label>
-        <label className="flex items-center justify-between text-sm" style={{ color: theme.settingsLabel }}>
-          最小化到托盘
-          <input
-            type="checkbox"
-            checked={settings.minimize_to_tray}
-            onChange={(e) => onUpdate({ ...settings, minimize_to_tray: e.target.checked })}
-          />
-        </label>
-        <label className="flex items-center justify-between text-sm" style={{ color: theme.settingsLabel }}>
-          全局快捷键
+        </SettingRow>
+        <SettingRow label="全局快捷键" theme={theme}>
           <input
             type="text"
             value={settings.global_shortcut}
             onChange={(e) => onUpdate({ ...settings, global_shortcut: e.target.value })}
-            className="w-32 px-2 py-1 rounded text-sm text-right"
+            className="w-32 px-2 py-1 rounded text-sm text-right font-mono"
             style={inputStyle}
           />
-        </label>
-        <label className="flex items-center justify-between text-sm" style={{ color: theme.settingsLabel }}>
-          主题
+        </SettingRow>
+      </div>
+
+      {/* Behavior */}
+      <div>
+        <SectionTitle title="行为" theme={theme} />
+        <SettingRow label="开机自启" theme={theme}>
+          <input
+            type="checkbox"
+            checked={settings.auto_start}
+            onChange={(e) => onUpdate({ ...settings, auto_start: e.target.checked })}
+            className="accent-blue-500"
+          />
+        </SettingRow>
+        <SettingRow label="最小化到托盘" theme={theme}>
+          <input
+            type="checkbox"
+            checked={settings.minimize_to_tray}
+            onChange={(e) => onUpdate({ ...settings, minimize_to_tray: e.target.checked })}
+            className="accent-blue-500"
+          />
+        </SettingRow>
+      </div>
+
+      {/* Appearance */}
+      <div>
+        <SectionTitle title="外观" theme={theme} />
+        <SettingRow label="主题" theme={theme}>
           <select
             value={settings.theme}
             onChange={(e) => onUpdate({ ...settings, theme: e.target.value })}
@@ -69,40 +124,110 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             <option value="light">浅色</option>
             <option value="dark">深色</option>
           </select>
-        </label>
+        </SettingRow>
+      </div>
 
-        {/* Cloud Sync */}
-        <div className="pt-2 mt-2" style={{ borderTop: `1px solid ${theme.settingsBorder}` }}>
-          <label className="flex items-center justify-between text-sm" style={{ color: theme.settingsLabel }}>
-            启用云同步
+      {/* Cloud Sync */}
+      <div>
+        <SectionTitle title="云同步" theme={theme} />
+        <SettingRow label="启用同步" theme={theme}>
+          <input
+            type="checkbox"
+            checked={settings.sync_enabled}
+            onChange={(e) => onUpdate({ ...settings, sync_enabled: e.target.checked })}
+            className="accent-blue-500"
+          />
+        </SettingRow>
+        {settings.sync_enabled && (
+          <div className="mt-2 space-y-2">
             <input
-              type="checkbox"
-              checked={settings.sync_enabled}
-              onChange={(e) => onUpdate({ ...settings, sync_enabled: e.target.checked })}
+              type="text"
+              placeholder="服务器地址"
+              value={settings.sync_server || ""}
+              onChange={(e) => onUpdate({ ...settings, sync_server: e.target.value || null })}
+              className="w-full px-2 py-1 rounded text-sm"
+              style={inputStyle}
             />
-          </label>
-          {settings.sync_enabled && (
-            <>
-              <input
-                type="text"
-                placeholder="服务器地址"
-                value={settings.sync_server || ""}
-                onChange={(e) => onUpdate({ ...settings, sync_server: e.target.value || null })}
-                className="w-full mt-2 px-2 py-1 rounded text-sm"
-                style={inputStyle}
-              />
-              <div className="flex items-center gap-2 mt-2">
-                <button
-                  onClick={onSync}
-                  disabled={syncing || !settings.sync_server}
-                  className="px-3 py-1 rounded text-xs text-white disabled:opacity-40"
-                  style={{ background: "#3b82f6" }}
-                >
-                  {syncing ? "同步中..." : "立即同步"}
-                </button>
-                {syncStatus && <span className="text-xs" style={{ color: theme.settingsLabel }}>{syncStatus}</span>}
-              </div>
-            </>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onSync}
+                disabled={syncing || !settings.sync_server}
+                className="px-3 py-1 rounded text-xs text-white disabled:opacity-40 transition-opacity"
+                style={{ background: "#3b82f6" }}
+              >
+                {syncing ? "同步中..." : "立即同步"}
+              </button>
+              {syncStatus && (
+                <span className="text-xs" style={{ color: theme.settingsLabel }}>{syncStatus}</span>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Updates */}
+      <div>
+        <SectionTitle title="更新" theme={theme} />
+        <div className="text-xs space-y-1.5" style={{ color: theme.settingsLabel }}>
+          <div className="flex items-center justify-between">
+            <span>当前版本</span>
+            <span className="font-mono font-semibold" style={{ color: theme.settingsTitle }}>
+              {appVersion || "..."}
+            </span>
+          </div>
+          <SettingRow label="更新服务器" theme={theme}>
+            <input
+              type="text"
+              placeholder="https://example.com/updates"
+              value={settings.update_server_url || ""}
+              onChange={(e) => onUpdate({ ...settings, update_server_url: e.target.value || null })}
+              className="w-40 px-2 py-1 rounded text-sm text-right"
+              style={inputStyle}
+            />
+          </SettingRow>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checkingUpdate || !settings.update_server_url}
+              className="px-3 py-1 rounded text-xs text-white disabled:opacity-40 transition-opacity"
+              style={{ background: "#8b5cf6" }}
+            >
+              {checkingUpdate ? "检查中..." : "检查更新"}
+            </button>
+          </div>
+          {updateInfo && (
+            <div className="mt-1 text-xs" style={{ color: theme.settingsLabel }}>
+              {updateInfo.error ? (
+                <span style={{ color: "#ef4444" }}>{updateInfo.error}</span>
+              ) : updateInfo.latest_version ? (
+                <div className="space-y-1">
+                  {updateInfo.latest_version !== appVersion ? (
+                    <>
+                      <span style={{ color: "#10b981" }}>
+                        新版本可用: v{updateInfo.latest_version}
+                      </span>
+                      {updateInfo.download_url && (
+                        <div>
+                          <a
+                            href={updateInfo.download_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline"
+                            style={{ color: "#3b82f6" }}
+                          >
+                            下载更新
+                          </a>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span style={{ color: "#10b981" }}>已是最新版本</span>
+                  )}
+                </div>
+              ) : (
+                <span>未能获取版本信息</span>
+              )}
+            </div>
           )}
         </div>
       </div>

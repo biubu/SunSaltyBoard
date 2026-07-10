@@ -41,15 +41,6 @@ pub struct Hotkey {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Plugin {
-    pub id: String,
-    pub name: String,
-    pub version: String,
-    pub enabled: bool,
-    pub config: Option<String>,
-}
-
 pub struct Database {
     conn: Connection,
 }
@@ -92,6 +83,10 @@ impl Database {
                 if val.is_empty() { None } else { Some(val) }
             },
             theme: get_setting("theme", "dark"),
+            update_server_url: {
+                let val = get_setting("update_server_url", "");
+                if val.is_empty() { None } else { Some(val) }
+            },
         }
     }
 

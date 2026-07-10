@@ -9,6 +9,7 @@ pub struct Settings {
     pub sync_enabled: bool,
     pub sync_server: Option<String>,
     pub theme: String,
+    pub update_server_url: Option<String>,
 }
 
 impl Default for Settings {
@@ -21,6 +22,7 @@ impl Default for Settings {
             sync_enabled: false,
             sync_server: None,
             theme: "dark".to_string(),
+            update_server_url: None,
         }
     }
 }

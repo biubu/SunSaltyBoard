@@ -21,8 +21,16 @@ jobs:
             bundle_glob: src-tauri/target/release/bundle/nsis/SunSaltyBoard_*.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            bundles: deb
-            bundle_glob: src-tauri/target/release/bundle/deb/*.deb
+            bundles: deb,appimage
+            bundle_glob: src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/appimage/*.AppImage
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+            bundle_glob: src-tauri/target/release/bundle/dmg/*.dmg
+          - os: macos-13
+            target: x86_64-apple-darwin
+            bundles: dmg
+            bundle_glob: src-tauri/target/release/bundle/dmg/*.dmg
 
     runs-on: ${{ matrix.os }}
     env:

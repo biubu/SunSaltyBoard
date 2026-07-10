@@ -2,11 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ClipboardItem,
   Group,
-  Tag,
-  Hotkey,
-  Plugin,
   Settings,
   SyncStatus,
+  UpdateInfo,
 } from "../types";
 
 // Clipboard
@@ -60,51 +58,6 @@ export async function moveItemToGroup(
   return invoke("move_item_to_group", { item_id: itemId, group_id: groupId });
 }
 
-// Tags
-export async function getTags(): Promise<Tag[]> {
-  return invoke("get_tags");
-}
-
-export async function createTag(name: string, color: string): Promise<Tag> {
-  return invoke("create_tag", { name, color });
-}
-
-export async function deleteTag(id: string): Promise<void> {
-  return invoke("delete_tag", { id });
-}
-
-export async function addTagToItem(itemId: string, tagId: string): Promise<void> {
-  return invoke("add_tag_to_item", { item_id: itemId, tag_id: tagId });
-}
-
-export async function removeTagFromItem(
-  itemId: string,
-  tagId: string
-): Promise<void> {
-  return invoke("remove_tag_from_item", { item_id: itemId, tag_id: tagId });
-}
-
-// Hotkeys
-export async function getHotkeys(): Promise<Hotkey[]> {
-  return invoke("get_hotkeys");
-}
-
-export async function updateHotkey(
-  action: string,
-  keyCombination: string
-): Promise<void> {
-  return invoke("update_hotkey", { action, key_combination: keyCombination });
-}
-
-// Plugins
-export async function getPlugins(): Promise<Plugin[]> {
-  return invoke("get_plugins");
-}
-
-export async function togglePlugin(id: string, enabled: boolean): Promise<void> {
-  return invoke("toggle_plugin", { id, enabled });
-}
-
 // Settings
 export async function getSettings(): Promise<Settings> {
   return invoke("get_settings");
@@ -119,15 +72,11 @@ export async function triggerSync(): Promise<SyncStatus> {
   return invoke("trigger_sync");
 }
 
-export async function getSyncStatus(): Promise<SyncStatus> {
-  return invoke("get_sync_status");
+// Updates
+export async function getAppVersion(): Promise<string> {
+  return invoke("get_app_version");
 }
 
-// Window
-export async function showWindow(): Promise<void> {
-  return invoke("show_window");
-}
-
-export async function hideWindow(): Promise<void> {
-  return invoke("hide_window");
+export async function checkUpdate(): Promise<UpdateInfo> {
+  return invoke("check_update");
 }

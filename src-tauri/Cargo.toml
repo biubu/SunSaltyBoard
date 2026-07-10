@@ -48,8 +48,8 @@ anyhow = "1"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
-# Linux dependencies (keyboard/mouse simulation)
-[target.'cfg(target_os = "linux")'.dependencies]
+# Linux/macOS dependencies (keyboard/mouse simulation)
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 enigo = "0.2"
 
 # Windows API

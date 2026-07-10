@@ -8,7 +8,7 @@ mod sync;
 use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
     Manager,
 };
 use tauri_plugin_global_shortcut::Shortcut;
@@ -25,6 +25,7 @@ pub struct AppState {
     pub sync_manager: Arc<SyncManager>,
     pub current_shortcut: Arc<Mutex<Option<Shortcut>>>,
     pub app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    pub tray_icon: Arc<Mutex<Option<TrayIcon>>>,
 }
 
 fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
@@ -34,10 +35,10 @@ fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&show, &quit])
 }
 
-pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = create_tray_menu(app)?;
 
-    let _tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .tooltip("SunSaltyBoard - 剪贴板管理器")
@@ -67,21 +68,25 @@ pub fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         })
         .build(app)?;
 
+    // Store tray icon to prevent early drop (avoids duplicate icons on Windows)
+    let state = app.state::<AppState>();
+    *state.tray_icon.lock().unwrap() = Some(tray);
+
     Ok(())
 }
 
 #[cfg(windows)]
 fn show_window_near_mouse(window: &tauri::WebviewWindow) {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Foundation::RECT;
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
     use windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
     use windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN;
     use windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN;
-    use windows::Win32::Foundation::POINT;
 
     unsafe {
-        let mut point = POINT::default();
-        let _ = GetCursorPos(&mut point);
-
         let screen_width = GetSystemMetrics(SM_CXSCREEN) as i32;
         let screen_height = GetSystemMetrics(SM_CYSCREEN) as i32;
 
@@ -89,22 +94,27 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
         let window_width = window_size.width as i32;
         let window_height = window_size.height as i32;
 
-        let mut x = point.x - (window_width / 2);
-        let mut y = point.y - 50;
+        // Try to position near the foreground (active) window first
+        let (mut x, mut y) = {
+            let hwnd = GetForegroundWindow();
+            let mut rect = RECT::default();
+            if hwnd.0 != 0 && GetWindowRect(hwnd, &mut rect).is_ok() {
+                let cx = (rect.left + rect.right) / 2;
+                let cy = (rect.top + rect.bottom) / 2;
+                (cx - (window_width / 2), cy - 50)
+            } else {
+                // Fallback to cursor position
+                let mut point = POINT::default();
+                let _ = GetCursorPos(&mut point);
+                (point.x - (window_width / 2), point.y - 50)
+            }
+        };
 
         let margin = 10;
-        if x < margin {
-            x = margin;
-        }
-        if x + window_width > screen_width - margin {
-            x = screen_width - window_width - margin;
-        }
-        if y < margin {
-            y = margin;
-        }
-        if y + window_height > screen_height - margin {
-            y = screen_height - window_height - margin;
-        }
+        if x < margin { x = margin; }
+        if x + window_width > screen_width - margin { x = screen_width - window_width - margin; }
+        if y < margin { y = margin; }
+        if y + window_height > screen_height - margin { y = screen_height - window_height - margin; }
 
         let _ = window.set_position(tauri::Position::Physical(
             tauri::PhysicalPosition { x, y }
@@ -114,11 +124,11 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     use enigo::{Enigo, Mouse, Settings};
 
-    let mut enigo = match Enigo::new(&Settings::default()) {
+    let enigo = match Enigo::new(&Settings::default()) {
         Ok(e) => e,
         Err(_) => {
             let _ = window.center();
@@ -172,7 +182,7 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     let _ = window.center();
     let _ = window.show();
@@ -210,6 +220,7 @@ pub fn run() {
                 sync_manager,
                 current_shortcut: Arc::new(Mutex::new(None)),
                 app_handle: Arc::new(Mutex::new(Some(app_handle.clone()))),
+                tray_icon: Arc::new(Mutex::new(None)),
             });
 
             setup_tray(app)?;
@@ -267,8 +278,6 @@ pub fn run() {
             commands::get_hotkeys,
             commands::update_hotkey,
             commands::register_hotkey,
-            commands::get_plugins,
-            commands::toggle_plugin,
             commands::get_settings,
             commands::update_settings,
             commands::trigger_sync,
@@ -276,6 +285,8 @@ pub fn run() {
             commands::show_window,
             commands::hide_window,
             commands::get_mouse_position,
+            commands::get_app_version,
+            commands::check_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

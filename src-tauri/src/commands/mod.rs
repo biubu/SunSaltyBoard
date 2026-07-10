@@ -1,15 +1,8 @@
-use crate::database::{ClipboardItem, Group, Hotkey, Plugin, Tag};
+use crate::database::{ClipboardItem, Group, Hotkey, Tag};
 use crate::settings::Settings;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::{command, AppHandle, Manager, State};
-
-#[derive(Debug, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct SearchResult {
-    pub items: Vec<ClipboardItem>,
-    pub total: usize,
-}
 
 #[command]
 pub fn get_clipboard_history(
@@ -50,7 +43,7 @@ fn simulate_ctrl_v() -> Result<(), String> {
         thread::sleep(Duration::from_millis(200));
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use enigo::Keyboard;
         use std::thread;
@@ -259,18 +252,6 @@ pub fn register_hotkey(
     Ok(())
 }
 
-// Plugins
-#[command]
-pub fn get_plugins() -> Result<Vec<Plugin>, String> {
-    Ok(vec![])
-}
-
-#[command]
-pub fn toggle_plugin(id: String, enabled: bool) -> Result<(), String> {
-    log::info!("Toggle plugin {}: {}", id, enabled);
-    Ok(())
-}
-
 // Settings
 #[command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
@@ -300,6 +281,9 @@ pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     if let Ok(Some(theme)) = db.get_setting("theme") {
         settings.theme = theme;
     }
+    if let Ok(Some(update_server)) = db.get_setting("update_server_url") {
+        settings.update_server_url = Some(update_server);
+    }
 
     // Configure sync manager with loaded settings
     if settings.sync_enabled {
@@ -327,6 +311,10 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
             .map_err(|e| e.to_string())?;
     }
     db.set_setting("theme", &settings.theme).map_err(|e| e.to_string())?;
+    if let Some(ref url) = settings.update_server_url {
+        db.set_setting("update_server_url", url)
+            .map_err(|e| e.to_string())?;
+    }
 
     // Also update in-memory settings
     let mut state_settings = state.settings.lock().map_err(|e| e.to_string())?;
@@ -380,8 +368,8 @@ pub struct MousePosition {
 pub fn get_mouse_position() -> Result<MousePosition, String> {
     #[cfg(windows)]
     {
-        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
         use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
         unsafe {
             let mut point = POINT::default();
@@ -389,8 +377,75 @@ pub fn get_mouse_position() -> Result<MousePosition, String> {
             Ok(MousePosition { x: point.x, y: point.y })
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use enigo::Mouse;
+
+        let enigo = enigo::Enigo::new(&enigo::Settings::default())
+            .map_err(|e| format!("enigo init: {}", e))?;
+        let (x, y) = enigo.location()
+            .map_err(|e| format!("get location: {}", e))?;
+        Ok(MousePosition { x: x as i32, y: y as i32 })
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         Ok(MousePosition { x: 0, y: 0 })
+    }
+}
+
+// App version & updates
+#[command]
+pub fn get_app_version() -> Result<String, String> {
+    Ok(env!("CARGO_PKG_VERSION").to_string())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub latest_version: Option<String>,
+    pub download_url: Option<String>,
+    pub release_notes: Option<String>,
+    pub error: Option<String>,
+}
+
+#[command]
+pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo, String> {
+    let url = {
+        let settings = state.settings.lock().map_err(|e| e.to_string())?;
+        settings.update_server_url.clone()
+    };
+
+    let server_url = match url {
+        Some(u) if !u.is_empty() => u,
+        _ => return Ok(UpdateInfo {
+            latest_version: None,
+            download_url: None,
+            release_notes: None,
+            error: Some("未配置更新服务器地址".to_string()),
+        }),
+    };
+
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    let endpoint = format!("{}/update.json?current={}", server_url.trim_end_matches('/'), current_version);
+
+    match reqwest::get(&endpoint).await {
+        Ok(resp) => {
+            if let Ok(info) = resp.json::<UpdateInfo>().await {
+                Ok(info)
+            } else {
+                Ok(UpdateInfo {
+                    latest_version: None,
+                    download_url: None,
+                    release_notes: None,
+                    error: Some("无法解析更新响应".to_string()),
+                })
+            }
+        }
+        Err(e) => Ok(UpdateInfo {
+            latest_version: None,
+            download_url: None,
+            release_notes: None,
+            error: Some(format!("检查更新失败: {}", e)),
+        }),
     }
 }

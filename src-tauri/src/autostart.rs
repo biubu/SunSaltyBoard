@@ -2,7 +2,7 @@
 use std::env;
 #[cfg(windows)]
 use std::process::Command;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::env;
 #[cfg(target_os = "linux")]
 use std::fs;
@@ -20,7 +20,12 @@ pub fn setup_autostart(enabled: bool) {
         setup_autostart_linux(enabled);
     }
 
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    {
+        setup_autostart_macos(enabled);
+    }
+
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = enabled;
     }
@@ -86,7 +91,7 @@ fn setup_autostart_linux(enabled: bool) {
             return;
         }
     };
-    let mut autostart_dir = home.join(".config").join("autostart");
+    let autostart_dir = home.join(".config").join("autostart");
 
     let desktop_file = autostart_dir.join("SunSaltyBoard.desktop");
 
@@ -128,6 +133,61 @@ fn setup_autostart_linux(enabled: bool) {
             } else {
                 log::info!("Auto-start disabled on Linux");
             }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn setup_autostart_macos(enabled: bool) {
+    let home = match env::var("HOME") {
+        Ok(h) => std::path::PathBuf::from(h),
+        Err(_) => return,
+    };
+
+    let launch_agents_dir = home.join("Library").join("LaunchAgents");
+    let plist_path = launch_agents_dir.join("com.sunSaltyBoard.desktop.plist");
+
+    if enabled {
+        let exe_path = match env::current_exe() {
+            Ok(p) => p.to_string_lossy().to_string(),
+            Err(_) => return,
+        };
+
+        if let Err(e) = std::fs::create_dir_all(&launch_agents_dir) {
+            log::error!("Failed to create LaunchAgents directory: {}", e);
+            return;
+        }
+
+        let plist = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sunSaltyBoard.desktop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>"#,
+            exe_path
+        );
+
+        if let Err(e) = std::fs::write(&plist_path, plist) {
+            log::error!("Failed to write plist file: {}", e);
+        } else {
+            log::info!("Auto-start enabled on macOS");
+        }
+    } else if plist_path.exists() {
+        if let Err(e) = std::fs::remove_file(&plist_path) {
+            log::error!("Failed to remove plist file: {}", e);
+        } else {
+            log::info!("Auto-start disabled on macOS");
         }
     }
 }
