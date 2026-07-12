@@ -28,3 +28,6 @@ src-tauri/target/
 src-tauri/Cargo.lock
 src-tauri/convert-icon.cjs
 .claude
+.codegraph/
+.opencode/
+.sisyphus/

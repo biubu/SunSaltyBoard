@@ -80,14 +80,19 @@ fn simulate_ctrl_v() -> Result<(), String> {
 
         thread::sleep(Duration::from_millis(100));
 
+        #[cfg(target_os = "macos")]
+        let modifier = enigo::Key::Meta;
+        #[cfg(target_os = "linux")]
+        let modifier = enigo::Key::Control;
+
         let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
             .map_err(|e| format!("enigo init: {}", e))?;
-        enigo.key(enigo::Key::Control, enigo::Direction::Press)
-            .map_err(|e| format!("failed key_down control: {}", e))?;
+        enigo.key(modifier, enigo::Direction::Press)
+            .map_err(|e| format!("failed key_down modifier: {}", e))?;
         enigo.key(enigo::Key::Unicode('v'), enigo::Direction::Click)
             .map_err(|e| format!("failed key_down v: {}", e))?;
-        enigo.key(enigo::Key::Control, enigo::Direction::Release)
-            .map_err(|e| format!("failed key_up control: {}", e))?;
+        enigo.key(modifier, enigo::Direction::Release)
+            .map_err(|e| format!("failed key_up modifier: {}", e))?;
 
         thread::sleep(Duration::from_millis(200));
     }
@@ -486,6 +491,56 @@ pub struct UpdateInfo {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    body: Option<String>,
+    html_url: Option<String>,
+    assets: Vec<GitHubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+fn parse_github_repo(url: &str) -> Option<(String, String)> {
+    let url = url.trim().trim_end_matches('/');
+    let marker = "github.com/";
+    let idx = url.find(marker)?;
+    let after = &url[idx + marker.len()..];
+    let after = after.split("/releases").next().unwrap_or(after);
+    let parts: Vec<&str> = after.split('/').take(2).collect();
+    if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+        Some((parts[0].to_string(), parts[1].to_string()))
+    } else {
+        None
+    }
+}
+
+fn pick_release_asset(assets: &[GitHubAsset]) -> Option<String> {
+    const RANKED: &[(&str, u32)] = &[
+        (".exe", 100),
+        (".msi", 95),
+        (".dmg", 90),
+        (".deb", 80),
+        (".appimage", 70),
+    ];
+
+    assets
+        .iter()
+        .filter_map(|a| {
+            let lower = a.name.to_lowercase();
+            RANKED
+                .iter()
+                .find(|(ext, _)| lower.ends_with(ext))
+                .map(|(_, score)| (*score, a.browser_download_url.clone()))
+        })
+        .max_by_key(|(score, _)| *score)
+        .map(|(_, url)| url)
+}
+
 #[command]
 pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo, String> {
     let url = {
@@ -495,17 +550,27 @@ pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo, Stri
 
     let server_url = match url {
         Some(u) if !u.is_empty() => u,
-        _ => return Ok(UpdateInfo {
-            latest_version: None,
-            download_url: None,
-            release_notes: None,
-            error: Some("未配置更新服务器地址".to_string()),
-        }),
+        _ => {
+            return Ok(UpdateInfo {
+                latest_version: None,
+                download_url: None,
+                release_notes: None,
+                error: Some("未配置更新服务器地址".to_string()),
+            });
+        }
     };
 
     let current_version = env!("CARGO_PKG_VERSION");
 
-    let endpoint = format!("{}/update.json?current={}", server_url.trim_end_matches('/'), current_version);
+    if let Some((owner, repo)) = parse_github_repo(&server_url) {
+        return Ok(check_github_release(&owner, &repo).await);
+    }
+
+    let endpoint = format!(
+        "{}/update.json?current={}",
+        server_url.trim_end_matches('/'),
+        current_version
+    );
 
     match HTTP_CLIENT
         .get(&endpoint)
@@ -539,5 +604,65 @@ pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo, Stri
             release_notes: None,
             error: Some(format!("检查更新失败: {}", e)),
         }),
+    }
+}
+
+async fn check_github_release(owner: &str, repo: &str) -> UpdateInfo {
+    let api_url = format!("https://api.github.com/repos/{}/{}/releases/latest", owner, repo);
+
+    match HTTP_CLIENT
+        .get(&api_url)
+        .header("User-Agent", "SunSaltyBoard")
+        .header("Accept", "application/vnd.github+json")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let status = resp.status();
+            if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                return UpdateInfo {
+                    latest_version: None,
+                    download_url: None,
+                    release_notes: None,
+                    error: Some(format!(
+                        "GitHub API 限流 ({}),稍后重试或换用自定义 update.json",
+                        status.as_u16()
+                    )),
+                };
+            }
+            if !status.is_success() {
+                return UpdateInfo {
+                    latest_version: None,
+                    download_url: None,
+                    release_notes: None,
+                    error: Some(format!("GitHub API 返回状态 {}", status.as_u16())),
+                };
+            }
+            match resp.json::<GitHubRelease>().await {
+                Ok(release) => {
+                    let latest = release.tag_name.trim_start_matches('v').to_string();
+                    let download_url = pick_release_asset(&release.assets).or(release.html_url);
+                    UpdateInfo {
+                        latest_version: Some(latest),
+                        download_url,
+                        release_notes: release.body,
+                        error: None,
+                    }
+                }
+                Err(e) => UpdateInfo {
+                    latest_version: None,
+                    download_url: None,
+                    release_notes: None,
+                    error: Some(format!("解析 GitHub 响应失败: {}", e)),
+                },
+            }
+        }
+        Err(e) => UpdateInfo {
+            latest_version: None,
+            download_url: None,
+            release_notes: None,
+            error: Some(format!("请求 GitHub 失败: {}", e)),
+        },
     }
 }

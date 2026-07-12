@@ -38,7 +38,7 @@ fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = create_tray_menu(app)?;
 
-    let tray = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::new()
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .tooltip("SunSaltyBoard - 剪贴板管理器")
@@ -65,8 +65,14 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                     show_window_near_mouse(&window);
                 }
             }
-        })
-        .build(app)?;
+        });
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.icon_as_template(true);
+    }
+
+    let tray = builder.build(app)?;
 
     // Store tray icon to prevent early drop (avoids duplicate icons on Windows)
     let state = app.state::<AppState>();
@@ -98,7 +104,7 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
         let (mut x, mut y) = {
             let hwnd = GetForegroundWindow();
             let mut rect = RECT::default();
-            if !hwnd.is_null() && GetWindowRect(hwnd, &mut rect).is_ok() {
+            if !hwnd.is_invalid() && GetWindowRect(hwnd, &mut rect).is_ok() {
                 let cx = (rect.left + rect.right) / 2;
                 let cy = (rect.top + rect.bottom) / 2;
                 (cx - (window_width / 2), cy - 50)

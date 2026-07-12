@@ -21,10 +21,12 @@ function SettingRow({
   children: React.ReactNode;
 }) {
   return (
-    <label className="flex items-center justify-between text-sm min-h-[32px]" style={{ color: theme.settingsLabel }}>
-      <span className="shrink-0 mr-3">{label}</span>
-      {children}
-    </label>
+    <div className="space-y-1">
+      <div className="text-sm" style={{ color: theme.settingsLabel }}>
+        {label}
+      </div>
+      <div>{children}</div>
+    </div>
   );
 }
 
@@ -121,7 +123,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             value={draft.max_history_size}
             onChange={(e) => updateDraft({ max_history_size: Number(e.target.value) })}
             onBlur={() => commitDraft(draft)}
-            className="w-20 px-2 py-1 rounded text-sm text-right"
+            className="w-full px-2 py-1 rounded text-sm"
             style={inputStyle}
             min={50}
             max={5000}
@@ -133,7 +135,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             value={draft.global_shortcut}
             onChange={(e) => updateDraft({ global_shortcut: e.target.value })}
             onBlur={() => commitDraft(draft)}
-            className="w-32 px-2 py-1 rounded text-sm text-right font-mono"
+            className="w-full px-2 py-1 rounded text-sm font-mono"
             style={inputStyle}
           />
         </SettingRow>
@@ -147,7 +149,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             type="checkbox"
             checked={draft.auto_start}
             onChange={(e) => applyImmediate({ ...draft, auto_start: e.target.checked })}
-            className="accent-blue-500"
+            className="h-4 w-4 accent-blue-500"
           />
         </SettingRow>
         <SettingRow label="最小化到托盘" theme={theme}>
@@ -155,7 +157,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             type="checkbox"
             checked={draft.minimize_to_tray}
             onChange={(e) => applyImmediate({ ...draft, minimize_to_tray: e.target.checked })}
-            className="accent-blue-500"
+            className="h-4 w-4 accent-blue-500"
           />
         </SettingRow>
       </div>
@@ -167,7 +169,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
           <select
             value={draft.theme}
             onChange={(e) => applyImmediate({ ...draft, theme: e.target.value })}
-            className="px-2 py-1 rounded text-sm"
+            className="w-full px-2 py-1 rounded text-sm"
             style={inputStyle}
           >
             <option value="light">浅色</option>
@@ -184,7 +186,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
             type="checkbox"
             checked={draft.sync_enabled}
             onChange={(e) => applyImmediate({ ...draft, sync_enabled: e.target.checked })}
-            className="accent-blue-500"
+            className="h-4 w-4 accent-blue-500"
           />
         </SettingRow>
         {draft.sync_enabled && (
@@ -232,7 +234,7 @@ export function SettingsPanel({ settings, onUpdate, onSync, syncStatus, syncing,
               value={draft.update_server_url || ""}
               onChange={(e) => updateDraft({ update_server_url: e.target.value || null })}
               onBlur={() => commitDraft(draft)}
-              className="w-40 px-2 py-1 rounded text-sm text-right"
+              className="w-full px-2 py-1 rounded text-sm"
               style={inputStyle}
             />
           </SettingRow>
