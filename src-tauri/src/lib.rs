@@ -98,7 +98,7 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
         let (mut x, mut y) = {
             let hwnd = GetForegroundWindow();
             let mut rect = RECT::default();
-            if hwnd.0 != 0 && GetWindowRect(hwnd, &mut rect).is_ok() {
+            if !hwnd.is_null() && GetWindowRect(hwnd, &mut rect).is_ok() {
                 let cx = (rect.left + rect.right) / 2;
                 let cy = (rect.top + rect.bottom) / 2;
                 (cx - (window_width / 2), cy - 50)
