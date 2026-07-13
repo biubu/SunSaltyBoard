@@ -72,7 +72,7 @@ fn simulate_ctrl_v() -> Result<(), String> {
         thread::sleep(Duration::from_millis(200));
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
         use enigo::Keyboard;
         use std::thread;
@@ -80,82 +80,140 @@ fn simulate_ctrl_v() -> Result<(), String> {
 
         thread::sleep(Duration::from_millis(100));
 
-        #[cfg(target_os = "macos")]
-        let modifier = enigo::Key::Meta;
-        #[cfg(target_os = "linux")]
-        let modifier = enigo::Key::Control;
-
         let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
             .map_err(|e| format!("enigo init: {}", e))?;
-        enigo.key(modifier, enigo::Direction::Press)
+        enigo.key(enigo::Key::Control, enigo::Direction::Press)
             .map_err(|e| format!("failed key_down modifier: {}", e))?;
         enigo.key(enigo::Key::Unicode('v'), enigo::Direction::Click)
             .map_err(|e| format!("failed key_down v: {}", e))?;
-        enigo.key(modifier, enigo::Direction::Release)
+        enigo.key(enigo::Key::Control, enigo::Direction::Release)
             .map_err(|e| format!("failed key_up modifier: {}", e))?;
 
         thread::sleep(Duration::from_millis(200));
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        use enigo::Keyboard;
+        use std::thread;
+
+        let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
+            .map_err(|e| format!("enigo init: {}", e))?;
+        enigo.key(enigo::Key::Meta, enigo::Direction::Press)
+            .map_err(|e| format!("failed key_down modifier: {}", e))?;
+        thread::sleep(Duration::from_millis(30));
+        let paste_result = enigo.raw(9, enigo::Direction::Click)
+            .map_err(|e| format!("failed key_down v: {}", e));
+        thread::sleep(Duration::from_millis(30));
+        let release_result = enigo.key(enigo::Key::Meta, enigo::Direction::Release)
+            .map_err(|e| format!("failed key_up modifier: {}", e));
+        paste_result?;
+        release_result?;
+        thread::sleep(Duration::from_millis(350));
+    }
+
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_paste_target(
+    state: &AppState,
+) -> Result<objc2::rc::Retained<objc2_app_kit::NSRunningApplication>, String> {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGPreflightPostEventAccess() -> bool;
+        fn CGRequestPostEventAccess() -> bool;
+    }
+
+    let has_access = unsafe {
+        CGPreflightPostEventAccess() || CGRequestPostEventAccess()
+    };
+    if !has_access {
+        return Err("需要辅助功能权限：请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 SunSaltyBoard，然后重试".to_string());
+    }
+
+    let target = state
+        .previous_frontmost_app
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or("未找到要粘贴到的活动窗口，请切回目标应用后重新打开剪贴板")?;
+    if target.isTerminated() {
+        return Err("目标应用已退出，请重新打开剪贴板后再试".to_string());
+    }
+    Ok(target)
+}
+
+#[cfg(target_os = "macos")]
+fn activate_macos_app(app: &objc2_app_kit::NSRunningApplication) -> Result<(), String> {
+    use objc2_app_kit::NSApplicationActivationOptions;
+    use std::thread;
+
+    if !app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) {
+        return Err("无法恢复之前的活动应用".to_string());
+    }
+    for _ in 0..20 {
+        if app.isActive() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    Err("等待目标应用激活超时".to_string())
+}
+
+fn paste_clipboard_item(
+    state: &AppState,
+    app: &AppHandle,
+    item: ClipboardItem,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let target = macos_paste_target(state)?;
+
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    let original = clipboard.get_text().ok();
+    let payload = if item.content_type == "text" {
+        item.content
+    } else {
+        item.preview
+    };
+
+    clipboard.set_text(&payload).map_err(|e| e.to_string())?;
+    state.clipboard_manager.record_self_write("text", &payload);
+
+    let result = (|| {
+        if let Some(window) = app.get_webview_window("main") {
+            window.hide().map_err(|e| e.to_string())?;
+        }
+        #[cfg(target_os = "macos")]
+        activate_macos_app(&target)?;
+        simulate_ctrl_v()
+    })();
+
+    if let Some(orig) = original {
+        state.clipboard_manager.record_self_write("text", &orig);
+        let _ = clipboard.set_text(&orig);
+    }
+
+    if result.is_err() {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+
+    result
 }
 
 #[command]
 pub fn paste_item(state: State<'_, AppState>, app: AppHandle, item: ClipboardItem) -> Result<(), String> {
     log::info!("Pasting item: {} of type {}", item.id, item.content_type);
-
-    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    let original = clipboard.get_text().ok();
-
-    let payload: String = if item.content_type == "text" {
-        item.content.clone()
-    } else {
-        item.preview.clone()
-    };
-
-    clipboard.set_text(&payload).map_err(|e| e.to_string())?;
-    state.clipboard_manager.record_self_write("text", &payload);
-
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-
-    simulate_ctrl_v()?;
-
-    if let Some(orig) = original {
-        let _ = clipboard.set_text(&orig);
-    }
-
-    Ok(())
+    paste_clipboard_item(state.inner(), &app, item)
 }
 
 #[command]
 pub fn paste_to_active(state: State<'_, AppState>, app: AppHandle, item: ClipboardItem) -> Result<(), String> {
     log::info!("Paste to active: {} of type {}", item.id, item.content_type);
-
-    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    let original = clipboard.get_text().ok();
-
-    let payload: String = if item.content_type == "text" {
-        item.content.clone()
-    } else {
-        item.preview.clone()
-    };
-
-    clipboard.set_text(&payload).map_err(|e| e.to_string())?;
-    state.clipboard_manager.record_self_write("text", &payload);
-
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-
-    simulate_ctrl_v()?;
-
-    if let Some(orig) = original {
-        let _ = clipboard.set_text(&orig);
-    }
-
-    Ok(())
+    paste_clipboard_item(state.inner(), &app, item)
 }
 
 #[command]

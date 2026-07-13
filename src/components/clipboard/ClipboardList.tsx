@@ -3,7 +3,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStore } from "../../store";
 import { formatTimeAgo, truncateText } from "../../utils";
 import type { ClipboardItem } from "../../types";
-import * as api from "../../services/api";
 
 const ITEM_HEIGHT = 56;
 
@@ -63,7 +62,7 @@ function TrashIcon() {
 }
 
 export function ClipboardList({ theme }: ClipboardListProps) {
-  const { items, isLoading, deleteItem, toggleFavorite } = useStore();
+  const { items, isLoading, deleteItem, pasteToActive, toggleFavorite } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
 
@@ -75,12 +74,8 @@ export function ClipboardList({ theme }: ClipboardListProps) {
   });
 
   const handlePaste = useCallback(async (item: ClipboardItem) => {
-    try {
-      await api.pasteToActive(item);
-    } catch (e) {
-      console.error("Paste failed:", e);
-    }
-  }, []);
+    await pasteToActive(item);
+  }, [pasteToActive]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

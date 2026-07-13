@@ -26,6 +26,8 @@ pub struct AppState {
     pub current_shortcut: Arc<Mutex<Option<Shortcut>>>,
     pub app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     pub tray_icon: Arc<Mutex<Option<TrayIcon>>>,
+    #[cfg(target_os = "macos")]
+    pub previous_frontmost_app: Arc<Mutex<Option<objc2::rc::Retained<objc2_app_kit::NSRunningApplication>>>>,
 }
 
 fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
@@ -35,11 +37,55 @@ fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&show, &quit])
 }
 
+#[cfg(target_os = "macos")]
+fn macos_tray_icon() -> tauri::image::Image<'static> {
+    fn rounded_rect(
+        x: f32,
+        y: f32,
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+        radius: f32,
+    ) -> bool {
+        let nearest_x = x.clamp(left + radius, right - radius);
+        let nearest_y = y.clamp(top + radius, bottom - radius);
+        let dx = x - nearest_x;
+        let dy = y - nearest_y;
+        dx * dx + dy * dy <= radius * radius
+    }
+
+    let size = 36u32;
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let px = x as f32 + 0.5;
+            let py = y as f32 + 0.5;
+            let outer = rounded_rect(px, py, 5.0, 4.0, 31.0, 35.0, 5.0);
+            let inner = rounded_rect(px, py, 9.0, 8.0, 27.0, 31.0, 2.0);
+            let clip = rounded_rect(px, py, 11.0, 1.0, 25.0, 10.0, 3.0);
+            let first_line = rounded_rect(px, py, 12.0, 14.0, 24.0, 17.0, 1.5);
+            let second_line = rounded_rect(px, py, 12.0, 20.0, 24.0, 23.0, 1.5);
+            let third_line = rounded_rect(px, py, 12.0, 26.0, 21.0, 29.0, 1.5);
+            if (outer && !inner) || clip || first_line || second_line || third_line {
+                rgba[((y * size + x) * 4 + 3) as usize] = 255;
+            }
+        }
+    }
+
+    tauri::image::Image::new_owned(rgba, size, size)
+}
+
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = create_tray_menu(app)?;
 
+    #[cfg(target_os = "macos")]
+    let icon = macos_tray_icon();
+    #[cfg(not(target_os = "macos"))]
+    let icon = app.default_window_icon().unwrap().clone();
+
     let mut builder = TrayIconBuilder::new()
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(icon)
         .menu(&menu)
         .tooltip("SunSaltyBoard - 剪贴板管理器")
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -130,9 +176,29 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn remember_frontmost_app(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSRunningApplication, NSWorkspace};
+
+    let Some(frontmost) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
+        return;
+    };
+    if frontmost == NSRunningApplication::currentApplication() {
+        return;
+    }
+
+    let state = window.state::<AppState>();
+    if let Ok(mut previous) = state.previous_frontmost_app.lock() {
+        *previous = Some(frontmost);
+    };
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn show_window_near_mouse(window: &tauri::WebviewWindow) {
     use enigo::{Enigo, Mouse, Settings};
+
+    #[cfg(target_os = "macos")]
+    remember_frontmost_app(window);
 
     let enigo = match Enigo::new(&Settings::default()) {
         Ok(e) => e,
@@ -236,6 +302,8 @@ pub fn run() {
                 current_shortcut: Arc::new(Mutex::new(None)),
                 app_handle: Arc::new(Mutex::new(Some(app_handle.clone()))),
                 tray_icon: Arc::new(Mutex::new(None)),
+                #[cfg(target_os = "macos")]
+                previous_frontmost_app: Arc::new(Mutex::new(None)),
             });
 
             setup_tray(app)?;
