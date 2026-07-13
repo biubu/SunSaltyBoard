@@ -72,12 +72,21 @@
     background: linear-gradient(145deg, #475569, #64748b);
   }
 
-  /* Title bar drag region */
+  /* Title bar drag region (Tauri's window drag.js reads this attribute;
+     the CSS rules below are a redundant hint for WebKit-based webviews). */
   [data-tauri-drag-region] {
     -webkit-app-region: drag;
     app-region: drag;
   }
-  button {
+
+  /* Clickable elements inside a drag region override it. */
+  button,
+  input,
+  textarea,
+  select,
+  [contenteditable="true"],
+  [role="button"],
+  [tabindex]:not([tabindex="-1"]) {
     -webkit-app-region: no-drag;
     app-region: no-drag;
   }

@@ -166,6 +166,8 @@ export function ClipboardList({ theme }: ClipboardListProps) {
               key={item.id}
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
+              role="button"
+              tabIndex={0}
               className="group cursor-pointer transition-colors duration-150 relative"
               style={{
                 position: "absolute",

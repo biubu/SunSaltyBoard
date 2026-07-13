@@ -193,62 +193,253 @@ fn remember_frontmost_app(window: &tauri::WebviewWindow) {
     };
 }
 
+/// Returns `(x, y, width, height)` in screen coordinates of the most likely
+/// focused window owned by the given PID. Uses `CGWindowListCopyWindowInfo` to
+/// enumerate on-screen windows and picks the largest normal-layer (layer == 0)
+/// window, which corresponds to the main/key window for typical apps.
+#[cfg(target_os = "macos")]
+fn macos_focused_window_bounds(pid: i32) -> Option<(i32, i32, i32, i32)> {
+    use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFNumberType, CFRetained, CFString};
+    use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
+
+    let option =
+        CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements;
+    let windows: Option<CFRetained<CFArray>> = CGWindowListCopyWindowInfo(option, 0);
+    let windows = windows?;
+
+    let dict_array: &CFArray = windows.as_opaque();
+    let count = dict_array.count();
+    if count <= 0 {
+        return None;
+    }
+
+    // Build the dictionary keys. CFString construction is cheap for short
+    // ASCII literals; we don't bother caching since this runs only on show.
+    let key_owner_pid = CFString::from_static_str("kCGWindowOwnerPID");
+    let key_layer = CFString::from_static_str("kCGWindowLayer");
+    let key_bounds = CFString::from_static_str("kCGWindowBounds");
+    let key_x = CFString::from_static_str("X");
+    let key_y = CFString::from_static_str("Y");
+    let key_w = CFString::from_static_str("Width");
+    let key_h = CFString::from_static_str("Height");
+
+    let mut best: Option<(i32, i32, i32, i32, i64)> = None;
+
+    for i in 0..count {
+        let raw = unsafe { dict_array.value_at_index(i) };
+        if raw.is_null() {
+            continue;
+        }
+        let dict: &CFDictionary = unsafe { &*(raw as *const CFDictionary) };
+
+        // Owner PID
+        let pid_raw =
+            unsafe { dict.value((&*key_owner_pid) as *const CFString as *const std::ffi::c_void) };
+        if pid_raw.is_null() {
+            continue;
+        }
+        let pid_num: &CFNumber = unsafe { &*(pid_raw as *const CFNumber) };
+        let mut owner_pid: i32 = 0;
+        let ok = unsafe {
+            pid_num.value(
+                CFNumberType::SInt32Type,
+                &mut owner_pid as *mut i32 as *mut std::ffi::c_void,
+            )
+        };
+        if !ok || owner_pid != pid {
+            continue;
+        }
+
+        // Layer (skip menu bar, tooltips, etc.)
+        let layer_raw = unsafe {
+            dict.value((&*key_layer) as *const CFString as *const std::ffi::c_void)
+        };
+        let mut layer: i32 = i32::MAX;
+        if !layer_raw.is_null() {
+            let layer_num: &CFNumber = unsafe { &*(layer_raw as *const CFNumber) };
+            unsafe {
+                layer_num.value(
+                    CFNumberType::SInt32Type,
+                    &mut layer as *mut i32 as *mut std::ffi::c_void,
+                );
+            }
+        }
+        if layer != 0 {
+            continue;
+        }
+
+        // Bounds (CFDictionary with X/Y/Width/Height)
+        let bounds_raw = unsafe {
+            dict.value((&*key_bounds) as *const CFString as *const std::ffi::c_void)
+        };
+        if bounds_raw.is_null() {
+            continue;
+        }
+        let bounds_dict: &CFDictionary = unsafe { &*(bounds_raw as *const CFDictionary) };
+
+        let mut x: f64 = 0.0;
+        let mut y: f64 = 0.0;
+        let mut w: f64 = 0.0;
+        let mut h: f64 = 0.0;
+
+        for (key, out) in [
+            (&key_x, &mut x),
+            (&key_y, &mut y),
+            (&key_w, &mut w),
+            (&key_h, &mut h),
+        ] {
+            let v_raw = unsafe {
+                bounds_dict.value((&**key) as *const CFString as *const std::ffi::c_void)
+            };
+            if v_raw.is_null() {
+                continue;
+            }
+            let v_num: &CFNumber = unsafe { &*(v_raw as *const CFNumber) };
+            unsafe {
+                v_num.value(
+                    CFNumberType::Float64Type,
+                    out as *mut f64 as *mut std::ffi::c_void,
+                );
+            }
+        }
+
+        if w <= 1.0 || h <= 1.0 {
+            continue;
+        }
+
+        let area = (w * h) as i64;
+        match best {
+            Some((_, _, _, _, a)) if a >= area => {}
+            _ => best = Some((x as i32, y as i32, w as i32, h as i32, area)),
+        }
+    }
+
+    best.map(|(x, y, w, h, _)| (x, y, w, h))
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn show_window_near_mouse(window: &tauri::WebviewWindow) {
-    use enigo::{Enigo, Mouse, Settings};
-
     #[cfg(target_os = "macos")]
     remember_frontmost_app(window);
 
-    let enigo = match Enigo::new(&Settings::default()) {
-        Ok(e) => e,
-        Err(_) => {
-            let _ = window.center();
-            let _ = window.show();
-            let _ = window.set_focus();
-            return;
+    let window_size = window
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize { width: 300, height: 600 });
+    let window_width = window_size.width as i32;
+    let window_height = window_size.height as i32;
+
+    let monitors = window.available_monitors().ok();
+    let find_monitor = |mx: i32, my: i32| -> Option<(i32, i32, i32, i32)> {
+        monitors.as_ref()?.iter().find_map(|m| {
+            let pos = m.position();
+            let size = m.size();
+            if mx >= pos.x
+                && mx <= pos.x + size.width as i32
+                && my >= pos.y
+                && my <= pos.y + size.height as i32
+            {
+                Some((pos.x, pos.y, size.width as i32, size.height as i32))
+            } else {
+                None
+            }
+        })
+    };
+    let fallback_screen = ||
+        -> (i32, i32) {
+            monitors
+                .as_ref()
+                .and_then(|m| m.first().map(|m| {
+                    let s = m.size();
+                    (s.width as i32, s.height as i32)
+                }))
+                .unwrap_or((1920, 1080))
+        };
+
+    // On macOS, prefer the focused app's window position so the popup
+    // appears near the input box the user is typing into.
+    #[cfg(target_os = "macos")]
+    let focused_bounds = {
+        let state = window.state::<AppState>();
+        state
+            .previous_frontmost_app
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|app| app.processIdentifier()))
+            .and_then(macos_focused_window_bounds)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let focused_bounds: Option<(i32, i32, i32, i32)> = None;
+
+    // Compute target (mx, my) and the containing screen's bounds.
+    let (target_x, target_y, screen_x, screen_y, screen_w, screen_h) = if let Some((wx, wy, ww, wh)) =
+        focused_bounds
+    {
+        // Place popup just above the bottom-center of the focused window,
+        // which is where input boxes typically live (chat, terminal, IDE).
+        let center_x = wx + ww / 2;
+        let bottom_y = wy + wh;
+        let screen = find_monitor(center_x, bottom_y).unwrap_or_else(|| {
+            let (sw, sh) = fallback_screen();
+            (0, 0, sw, sh)
+        });
+        (center_x, bottom_y, screen.0, screen.1, screen.2, screen.3)
+    } else {
+        use enigo::Mouse;
+        let enigo = match enigo::Enigo::new(&enigo::Settings::default()) {
+            Ok(e) => e,
+            Err(_) => {
+                let _ = window.center();
+                let _ = window.show();
+                let _ = window.set_focus();
+                return;
+            }
+        };
+        match enigo.location() {
+            Ok((mx, my)) => {
+                let (mx, my) = (mx as i32, my as i32);
+                let screen = find_monitor(mx, my).unwrap_or_else(|| {
+                    let (sw, sh) = fallback_screen();
+                    (0, 0, sw, sh)
+                });
+                (mx, my, screen.0, screen.1, screen.2, screen.3)
+            }
+            Err(_) => {
+                let _ = window.center();
+                let _ = window.show();
+                let _ = window.set_focus();
+                return;
+            }
         }
     };
 
-    if let Ok((mx, my)) = enigo.location() {
-        let (mx, my) = (mx as i32, my as i32);
-        let window_size = window.outer_size().unwrap_or(tauri::PhysicalSize { width: 300, height: 600 });
-        let window_width = window_size.width as i32;
-        let window_height = window_size.height as i32;
-
-        // Determine screen size from the monitor the cursor is on
-        let screen_size = window.available_monitors()
-            .ok()
-            .and_then(|monitors| {
-                monitors.into_iter().find(|m| {
-                    let pos = m.position();
-                    let size = m.size();
-                    mx >= pos.x && mx <= pos.x + size.width as i32
-                        && my >= pos.y && my <= pos.y + size.height as i32
-                })
-            })
-            .map(|m| {
-                let s = m.size();
-                (s.width as i32, s.height as i32)
-            })
-            .unwrap_or((1920, 1080));
-
-        let mut x = mx - (window_width / 2);
-        let mut y = my - 50;
-
-        let margin = 10;
-        let (screen_width, screen_height) = screen_size;
-        if x < margin { x = margin; }
-        if x + window_width > screen_width - margin { x = screen_width - window_width - margin; }
-        if y < margin { y = margin; }
-        if y + window_height > screen_height - margin { y = screen_height - window_height - margin; }
-
-        let _ = window.set_position(tauri::Position::Physical(
-            tauri::PhysicalPosition { x, y }
-        ));
-    } else {
-        let _ = window.center();
+    // Default position: centered horizontally on the target, slightly above it.
+    let mut x = target_x - (window_width / 2);
+    let mut y = target_y - window_height - 50;
+    // If the focused window is small, hug its bottom edge instead.
+    if let Some((_, _, ww, _)) = focused_bounds {
+        if ww < window_width + 40 {
+            y = target_y - window_height;
+        }
     }
+
+    let margin = 10;
+    // Clamp to the containing screen.
+    if x < screen_x + margin {
+        x = screen_x + margin;
+    }
+    if x + window_width > screen_x + screen_w - margin {
+        x = screen_x + screen_w - window_width - margin;
+    }
+    if y < screen_y + margin {
+        y = screen_y + margin;
+    }
+    if y + window_height > screen_y + screen_h - margin {
+        y = screen_y + screen_h - window_height - margin;
+    }
+
+    let _ = window.set_position(tauri::Position::Physical(
+        tauri::PhysicalPosition { x, y }
+    ));
 
     let _ = window.show();
     let _ = window.set_focus();

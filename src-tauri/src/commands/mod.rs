@@ -149,16 +149,24 @@ fn activate_macos_app(app: &objc2_app_kit::NSRunningApplication) -> Result<(), S
     use objc2_app_kit::NSApplicationActivationOptions;
     use std::thread;
 
-    if !app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) {
-        return Err("无法恢复之前的活动应用".to_string());
+    if app.isTerminated() {
+        return Err("目标应用已退出，请重新打开剪贴板后再试".to_string());
     }
-    for _ in 0..20 {
+
+    if !app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) {
+        thread::sleep(Duration::from_millis(80));
+        let _ = app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+    }
+
+    for _ in 0..40 {
         if app.isActive() {
-            return Ok(());
+            break;
         }
         thread::sleep(Duration::from_millis(25));
     }
-    Err("等待目标应用激活超时".to_string())
+
+    thread::sleep(Duration::from_millis(120));
+    Ok(())
 }
 
 fn paste_clipboard_item(

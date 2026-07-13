@@ -112,7 +112,7 @@ function App() {
 
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: theme.bg }}>
+    <div className="h-screen flex flex-col overflow-hidden" data-tauri-drag-region="deep" style={{ background: theme.bg }}>
       {/* Title Bar */}
       <header
         className="flex items-center justify-between px-4 py-3 border-b"
