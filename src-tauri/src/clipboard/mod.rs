@@ -147,16 +147,35 @@ impl ClipboardManager {
                     let mut last = last_html.lock().unwrap();
                     if *last != html {
                         if !is_self_write(&self_writes, "html", &html) {
-                            let preview = strip_html_tags(&html).chars().take(200).collect::<String>();
+                            let stripped = strip_html_tags(&html);
+                            let preview: String = stripped.chars().take(200).collect();
 
                             let event = ClipboardEvent {
                                 content_type: ClipboardContentType::Html.as_str().to_string(),
                                 content: html.clone(),
-                                preview,
+                                preview: preview.clone(),
                                 metadata: None,
                             };
 
                             emit_and_store(&app_handle, &event);
+
+                            // Suppress the plain-text echo that arboard will also produce
+                            // for HTML clipboard payloads, so we don't capture the same
+                            // content twice (once as html, once as text).
+                            if !preview.is_empty() {
+                                if let Ok(mut writes) = self_writes.lock() {
+                                    let now_ms = SystemTime::now()
+                                        .duration_since(UNIX_EPOCH)
+                                        .map(|d| d.as_millis())
+                                        .unwrap_or(0);
+                                    writes.retain(|w| w.expires_at_ms > now_ms);
+                                    writes.push(SelfWrite {
+                                        content_type: "text".to_string(),
+                                        content: preview,
+                                        expires_at_ms: now_ms + 5_000,
+                                    });
+                                }
+                            }
                         }
                         *last = html;
                         got_content = true;
@@ -216,19 +235,100 @@ fn is_self_write(writes: &Arc<Mutex<Vec<SelfWrite>>>, content_type: &str, conten
     }
 }
 
-fn strip_html_tags(html: &str) -> String {
-    let mut result = String::new();
-    let mut inside_tag = false;
-    for c in html.chars() {
-        if c == '<' {
-            inside_tag = true;
-        } else if c == '>' {
-            inside_tag = false;
-        } else if !inside_tag {
+fn decode_html_entities(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '&' {
             result.push(c);
+            continue;
+        }
+        let mut entity = String::new();
+        let mut end_with_semicolon = false;
+        while let Some(&next) = chars.peek() {
+            chars.next();
+            if next == ';' {
+                end_with_semicolon = true;
+                break;
+            }
+            entity.push(next);
+            if entity.len() > 10 {
+                break;
+            }
+        }
+        match entity.as_str() {
+            "nbsp" => result.push(' '),
+            "amp" => result.push('&'),
+            "lt" => result.push('<'),
+            "gt" => result.push('>'),
+            "quot" => result.push('"'),
+            "apos" => result.push('\''),
+            "copy" => result.push('\u{00A9}'),
+            "reg" => result.push('\u{00AE}'),
+            "trade" => result.push('\u{2122}'),
+            "mdash" => result.push('\u{2014}'),
+            "ndash" => result.push('\u{2013}'),
+            "hellip" => result.push('\u{2026}'),
+            "laquo" => result.push('\u{00AB}'),
+            "raquo" => result.push('\u{00BB}'),
+            "lsquo" => result.push('\u{2018}'),
+            "rsquo" => result.push('\u{2019}'),
+            "ldquo" => result.push('\u{201C}'),
+            "rdquo" => result.push('\u{201D}'),
+            _ => {
+                if let Some(digits) = entity.strip_prefix('#') {
+                    let code = if let Some(hex) = digits.strip_prefix(['x', 'X']) {
+                        u32::from_str_radix(hex, 16).ok()
+                    } else {
+                        digits.parse::<u32>().ok()
+                    };
+                    if let Some(n) = code {
+                        if let Some(ch) = char::from_u32(n) {
+                            result.push(ch);
+                            continue;
+                        }
+                    }
+                }
+                result.push('&');
+                result.push_str(&entity);
+                if end_with_semicolon {
+                    result.push(';');
+                }
+            }
         }
     }
     result
+}
+
+fn strip_html_tags(html: &str) -> String {
+    let mut result = String::new();
+    let mut inside_tag = false;
+    let mut text_buf = String::new();
+
+    for c in html.chars() {
+        match c {
+            '<' => {
+                if !inside_tag && !text_buf.is_empty() {
+                    result.push_str(&decode_html_entities(&text_buf));
+                    text_buf.clear();
+                }
+                inside_tag = true;
+            }
+            '>' if inside_tag => {
+                inside_tag = false;
+            }
+            _ if !inside_tag => {
+                text_buf.push(c);
+            }
+            _ => {}
+        }
+    }
+
+    if !text_buf.is_empty() {
+        result.push_str(&decode_html_entities(&text_buf));
+    }
+
+    result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn emit_and_store(app_handle: &AppHandle, event: &ClipboardEvent) {

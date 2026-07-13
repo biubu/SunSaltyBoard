@@ -197,8 +197,11 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
-    log::info!("Starting SunSaltyBoard application");
+    #[cfg(debug_assertions)]
+    {
+        env_logger::init();
+        log::info!("Starting SunSaltyBoard application");
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
