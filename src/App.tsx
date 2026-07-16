@@ -7,11 +7,18 @@ import { ClipboardList } from "./components/clipboard/ClipboardList";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import type { ClipboardItem } from "./types";
 
-const GROUP_COLORS = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4"];
 const CLIPBOARD_RELOAD_DEBOUNCE_MS = 150;
 
+function groupColor(name: string): string {
+  let hash = 0;
+  for (const character of name) {
+    hash = (hash * 31 + character.codePointAt(0)!) >>> 0;
+  }
+  return `hsl(${hash % 360}, 70%, 55%)`;
+}
+
 function App() {
-  const { loadHistory, loadSettings, loadGroups, settings, updateSettings, error, clearError, groups, selectedGroup, setSelectedGroup, createGroup, deleteGroup, searchQuery } = useStore();
+  const { loadHistory, loadSettings, loadGroups, settings, updateSettings, error, clearError, groups, selectedGroup, setSelectedGroup, createGroup, deleteGroup } = useStore();
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
@@ -29,7 +36,7 @@ function App() {
       }
       // Skip reload if user is actively searching; the search query will
       // re-run via the debounced SearchBar.
-      if (searchQuery.trim()) return;
+      if (useStore.getState().searchQuery.trim()) return;
       debounceTimer = window.setTimeout(() => {
         loadHistory();
       }, CLIPBOARD_RELOAD_DEBOUNCE_MS);
@@ -62,9 +69,9 @@ function App() {
   const handleCreateGroup = useCallback(() => {
     const name = prompt("分组名称:");
     if (name?.trim()) {
-      createGroup(name.trim(), GROUP_COLORS[groups.length % GROUP_COLORS.length]);
+      createGroup(name.trim(), groupColor(name.trim()));
     }
-  }, [createGroup, groups.length]);
+  }, [createGroup]);
 
   const isDark = settings?.theme === "dark";
 

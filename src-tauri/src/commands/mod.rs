@@ -6,7 +6,7 @@ use std::time::Duration;
 use tauri::{command, AppHandle, Manager, State};
 
 /// Shared HTTP client with connection pooling.
-static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> = once_cell::sync::Lazy::new(|| {
+pub(crate) static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> = once_cell::sync::Lazy::new(|| {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -382,36 +382,7 @@ pub fn register_hotkey(
 #[command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut settings = Settings::default();
-
-    if let Ok(Some(max_history)) = db.get_setting("max_history_size") {
-        if let Ok(v) = max_history.parse() {
-            settings.max_history_size = v;
-        }
-    }
-    if let Ok(Some(auto_start)) = db.get_setting("auto_start") {
-        settings.auto_start = auto_start == "true";
-    }
-    if let Ok(Some(minimize_to_tray)) = db.get_setting("minimize_to_tray") {
-        settings.minimize_to_tray = minimize_to_tray == "true";
-    }
-    if let Ok(Some(global_shortcut)) = db.get_setting("global_shortcut") {
-        settings.global_shortcut = global_shortcut;
-    }
-    if let Ok(Some(sync_enabled)) = db.get_setting("sync_enabled") {
-        settings.sync_enabled = sync_enabled == "true";
-    }
-    if let Ok(Some(sync_server)) = db.get_setting("sync_server") {
-        settings.sync_server = Some(sync_server);
-    }
-    if let Ok(Some(theme)) = db.get_setting("theme") {
-        settings.theme = theme;
-    }
-    if let Ok(Some(update_server)) = db.get_setting("update_server_url") {
-        settings.update_server_url = Some(update_server);
-    }
-
-    Ok(settings)
+    Ok(db.load_settings())
 }
 
 #[command]
@@ -432,10 +403,8 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
             .map_err(|e| e.to_string())?;
         db.set_setting("sync_enabled", &settings.sync_enabled.to_string())
             .map_err(|e| e.to_string())?;
-        if let Some(ref server) = settings.sync_server {
-            db.set_setting("sync_server", server)
-                .map_err(|e| e.to_string())?;
-        }
+        db.set_setting("sync_server", settings.sync_server.as_deref().unwrap_or(""))
+            .map_err(|e| e.to_string())?;
         db.set_setting("theme", &settings.theme).map_err(|e| e.to_string())?;
         if let Some(ref url) = settings.update_server_url {
             db.set_setting("update_server_url", url)

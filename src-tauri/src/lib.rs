@@ -10,6 +10,7 @@ use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
     Manager,
+    WindowEvent,
 };
 use tauri_plugin_global_shortcut::Shortcut;
 
@@ -463,8 +464,33 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let minimize_to_tray = window
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .map(|settings| settings.minimize_to_tray)
+                    .unwrap_or(false);
+                if minimize_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                } else {
+                    window.app_handle().exit(0);
+                }
+            }
+        })
         .setup(|app| {
             let app_handle = app.handle().clone();
+
+            // Hide the window immediately at startup. On Windows, even with
+            // `visible: false` in tauri.conf.json, the WebView2 compositor can
+            // briefly paint a default-black background before our first
+            // hide() call lands, causing a noticeable black flash. Forcing
+            // hide() as the very first thing in setup eliminates that race.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.hide();
+            }
 
             let db = Database::new(&app_handle).expect("Failed to initialize database");
             let settings = Arc::new(Mutex::new(db.load_settings()));
@@ -525,10 +551,6 @@ pub fn run() {
                 let state = app.state::<AppState>();
                 let mut current_shortcut = state.current_shortcut.lock().unwrap();
                 *current_shortcut = Some(shortcut);
-            }
-
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.hide();
             }
 
             Ok(())

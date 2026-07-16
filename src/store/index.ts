@@ -18,7 +18,6 @@ interface AppStore {
   loadHistory: () => Promise<void>;
   search: (query: string) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
-  pasteItem: (item: ClipboardItem) => Promise<void>;
   pasteToActive: (item: ClipboardItem) => Promise<void>;
   toggleFavorite: (id: string) => Promise<void>;
 
@@ -81,14 +80,6 @@ export const useStore = create<AppStore>((set, get) => ({
       set((state) => ({
         items: state.items.filter((item) => item.id !== id),
       }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
-  pasteItem: async (item: ClipboardItem) => {
-    try {
-      await api.pasteItem(item);
     } catch (e) {
       set({ error: String(e) });
     }

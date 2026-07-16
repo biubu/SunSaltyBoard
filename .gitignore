@@ -31,3 +31,6 @@ src-tauri/convert-icon.cjs
 .codegraph/
 .opencode/
 .sisyphus/
+
+# OpenSpec working state
+openspec/changes/

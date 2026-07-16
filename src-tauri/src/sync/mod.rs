@@ -1,16 +1,27 @@
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use crate::commands::HTTP_CLIENT;
 use crate::database::ClipboardItem;
 use crate::AppState;
 use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncState {
+    Idle,
+    Configured,
+    Syncing,
+    Synced,
+    NotConfigured,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncStatus {
     pub connected: bool,
     pub last_sync: Option<String>,
-    pub status: String,
+    pub status: SyncState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,7 +42,7 @@ impl SyncManager {
             status: Arc::new(Mutex::new(SyncStatus {
                 connected: false,
                 last_sync: None,
-                status: "idle".to_string(),
+                status: SyncState::Idle,
             })),
             server_url: Arc::new(Mutex::new(None)),
             auth_token: Arc::new(Mutex::new(None)),
@@ -44,9 +55,9 @@ impl SyncManager {
 
         let mut status = self.status.lock().unwrap();
         if url.is_some() {
-            status.status = "configured".to_string();
+            status.status = SyncState::Configured;
         } else {
-            status.status = "idle".to_string();
+            status.status = SyncState::Idle;
             status.connected = false;
         }
     }
@@ -66,14 +77,14 @@ impl SyncManager {
 
         {
             let mut status = self.status.lock().unwrap();
-            status.status = "syncing".to_string();
+            status.status = SyncState::Syncing;
         }
 
         let url = match server_url {
             Some(u) if !u.is_empty() => u,
             _ => {
                 let mut status = self.status.lock().unwrap();
-                status.status = "not_configured".to_string();
+                status.status = SyncState::NotConfigured;
                 return Err("Sync server not configured".to_string());
             }
         };
@@ -95,14 +106,14 @@ impl SyncManager {
                 let mut status = self.status.lock().unwrap();
                 status.connected = true;
                 status.last_sync = Some(Utc::now().to_rfc3339());
-                status.status = "synced".to_string();
+                status.status = SyncState::Synced;
                 Ok(status.clone())
             }
             Err(e) => {
                 // Reset the status to a clean error string instead of
                 // accumulating prefixes on repeated failures.
                 let mut status = self.status.lock().unwrap();
-                status.status = "error".to_string();
+                status.status = SyncState::Error;
                 status.connected = false;
                 Err(e)
             }
@@ -112,12 +123,7 @@ impl SyncManager {
     async fn sync_http(url: &str, auth_token: Option<&str>, payload: &SyncPayload) -> Result<(), String> {
         log::info!("Syncing {} items to {}", payload.items.len(), url);
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e| format!("build client: {}", e))?;
-
-        let mut req = client.post(url).timeout(Duration::from_secs(30)).json(payload);
+        let mut req = HTTP_CLIENT.post(url).json(payload);
         if let Some(tok) = auth_token {
             if !tok.is_empty() {
                 req = req.bearer_auth(tok);

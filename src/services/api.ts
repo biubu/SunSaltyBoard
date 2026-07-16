@@ -3,7 +3,6 @@ import type {
   ClipboardItem,
   Group,
   Settings,
-  SyncStatus,
   UpdateInfo,
 } from "../types";
 
@@ -20,10 +19,6 @@ export async function searchClipboard(
   limit?: number
 ): Promise<ClipboardItem[]> {
   return invoke("search_clipboard", { query, limit });
-}
-
-export async function pasteItem(item: ClipboardItem): Promise<void> {
-  return invoke("paste_item", { item });
 }
 
 export async function pasteToActive(item: ClipboardItem): Promise<void> {
@@ -65,11 +60,6 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSettings(settings: Settings): Promise<void> {
   return invoke("update_settings", { settings });
-}
-
-// Sync
-export async function triggerSync(): Promise<SyncStatus> {
-  return invoke("trigger_sync");
 }
 
 // Updates

@@ -58,7 +58,7 @@ pub struct ClipboardManager {
 #[derive(Clone)]
 struct SelfWrite {
     content_type: String,
-    content: String,
+    content_hash: String,
     expires_at_ms: u128,
 }
 
@@ -82,7 +82,7 @@ impl ClipboardManager {
             .unwrap_or(0);
         let entry = SelfWrite {
             content_type: content_type.to_string(),
-            content: content.to_string(),
+            content_hash: content_fingerprint(content_type, content),
             expires_at_ms: now_ms + 5_000,
         };
         if let Ok(mut writes) = self.self_writes.lock() {
@@ -102,11 +102,16 @@ impl ClipboardManager {
 
         thread::spawn(move || {
             log::info!("Clipboard monitor starting");
-            let mut clipboard = match arboard::Clipboard::new() {
-                Ok(c) => c,
-                Err(e) => {
-                    log::error!("Failed to initialize clipboard: {}", e);
-                    return;
+            let mut clipboard = loop {
+                match arboard::Clipboard::new() {
+                    Ok(c) => break c,
+                    Err(e) => {
+                        log::error!("Failed to initialize clipboard: {}", e);
+                        if !running.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_secs(2));
+                    }
                 }
             };
 
@@ -171,7 +176,7 @@ impl ClipboardManager {
                                     writes.retain(|w| w.expires_at_ms > now_ms);
                                     writes.push(SelfWrite {
                                         content_type: "text".to_string(),
-                                        content: preview,
+                                        content_hash: content_fingerprint("text", &stripped),
                                         expires_at_ms: now_ms + 5_000,
                                     });
                                 }
@@ -222,17 +227,26 @@ fn is_self_write(writes: &Arc<Mutex<Vec<SelfWrite>>>, content_type: &str, conten
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
+    let content_hash = content_fingerprint(content_type, content);
     let Ok(mut writes) = writes.lock() else { return false };
     writes.retain(|w| w.expires_at_ms > now_ms);
     if let Some(pos) = writes
         .iter()
-        .position(|w| w.content_type == content_type && w.content == content)
+        .position(|w| w.content_type == content_type && w.content_hash == content_hash)
     {
         writes.remove(pos);
         true
     } else {
         false
     }
+}
+
+fn content_fingerprint(content_type: &str, content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content_type.as_bytes());
+    hasher.update([0]);
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 fn decode_html_entities(s: &str) -> String {
@@ -333,13 +347,15 @@ fn strip_html_tags(html: &str) -> String {
 
 fn emit_and_store(app_handle: &AppHandle, event: &ClipboardEvent) {
     if let Some(state) = app_handle.try_state::<AppState>() {
-        if let Ok(db) = state.db.lock() {
+        let item_to_emit = {
+            let Ok(db) = state.db.lock() else { return };
             let dedup_key = event.content.clone();
 
             if let Ok(Some(existing_id)) = db.find_by_content(&dedup_key) {
                 if let Err(e) = db.update_item_timestamp(&existing_id) {
                     log::error!("Failed to update item timestamp: {}", e);
                 }
+                None
             } else {
                 let item = ClipboardItem {
                     id: Uuid::new_v4().to_string(),
@@ -358,10 +374,13 @@ fn emit_and_store(app_handle: &AppHandle, event: &ClipboardEvent) {
                 if let Ok(settings) = state.settings.lock() {
                     let _ = db.prune_history(settings.max_history_size);
                 }
+                Some(item)
+            }
+        };
 
-                if let Err(e) = app_handle.emit("clipboard-changed", &item) {
-                    log::error!("Failed to emit clipboard event: {}", e);
-                }
+        if let Some(item) = item_to_emit {
+            if let Err(e) = app_handle.emit("clipboard-changed", &item) {
+                log::error!("Failed to emit clipboard event: {}", e);
             }
         }
     }

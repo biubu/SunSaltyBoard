@@ -39,7 +39,7 @@ src-tauri/src/    — Rust backend
 - **Dev server on fixed port 1420** (strict). Vite ignores `src-tauri/**` in file watcher.
 - **Tauri capabilities** minimal (only `core:default` + `opener:default`). Add permissions here when adding plugins: `src-tauri/capabilities/default.json`
 - **Database**: `clipstash.db` in Tauri app data dir. Schema auto-created on first run. FTS5 virtual table for search.
-- **Clipboard monitoring** uses polling (500ms idle, 200ms on change), not OS events.
+- **Clipboard monitoring** uses polling — 200ms when change detected, 500ms when idle; not OS events.
 - **Sync** sends POST with JSON payload of clipboard items to `sync_server` URL.
 - **Updates** checks `update_server_url` for new versions; version and check button in settings.
 - **Cross-platform**: Windows (Win32 API), Linux (enigo), macOS (enigo + CoreGraphics).

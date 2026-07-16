@@ -325,7 +325,7 @@ impl Database {
     }
 
     pub fn prune_history(&self, max_size: i32) -> Result<usize> {
-        let count: i32 = self.conn.query_row(
+        let mut count: i32 = self.conn.query_row(
             "SELECT COUNT(*) FROM clipboard_items",
             [],
             |row| row.get(0),
@@ -333,18 +333,25 @@ impl Database {
         if count <= max_size {
             return Ok(0);
         }
-        let to_delete = count - max_size;
-        self.conn.execute(
-            "DELETE FROM clipboard_items WHERE id IN (
-                SELECT id FROM clipboard_items
-                WHERE is_favorite = 0
-                ORDER BY created_at ASC
-                LIMIT ?1
-            )",
-            params![to_delete],
-        )?;
-        // FTS index is kept in sync via the `clipboard_ad` AFTER DELETE trigger.
-        let deleted = self.conn.changes() as usize;
+
+        let batch_size = 200;
+        let mut deleted = 0usize;
+        while count > max_size {
+            let limit = (count - max_size).min(batch_size);
+            let batch_deleted = self.conn.execute(
+                "DELETE FROM clipboard_items
+                 WHERE is_favorite = 0
+                 ORDER BY created_at ASC
+                 LIMIT ?1",
+                params![limit],
+            )?;
+            if batch_deleted == 0 {
+                break;
+            }
+            deleted += batch_deleted;
+            count -= batch_deleted as i32;
+        }
+
         Ok(deleted)
     }
 
@@ -495,10 +502,14 @@ impl Database {
     }
 
     pub fn update_hotkey(&self, action: &str, key_combination: &str) -> Result<()> {
+        let id = Uuid::new_v4().to_string();
         self.conn.execute(
-            "INSERT OR REPLACE INTO hotkeys (id, action, key_combination, enabled)
-             VALUES ((SELECT id FROM hotkeys WHERE action = ?1), ?1, ?2, 1)",
-            params![action, key_combination],
+            "INSERT INTO hotkeys (id, action, key_combination, enabled)
+             VALUES (?1, ?2, ?3, 1)
+             ON CONFLICT(action) DO UPDATE SET
+                 key_combination = excluded.key_combination,
+                 enabled = 1",
+            params![id, action, key_combination],
         )?;
         Ok(())
     }
