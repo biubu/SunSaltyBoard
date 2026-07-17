@@ -33,7 +33,7 @@ export function SearchBar({ theme }: SearchBarProps) {
         value={localQuery}
         onChange={(e) => handleSearch(e.target.value)}
         placeholder="搜索剪贴历史..."
-        className="w-full rounded-lg px-4 py-2 text-sm transition-all duration-200"
+        className="w-full rounded-lg px-4 py-2 fs-lg transition-all duration-200"
         style={{
           background: theme.searchBg,
           color: theme.searchText,

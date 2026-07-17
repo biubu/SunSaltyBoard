@@ -174,7 +174,7 @@ export function HotkeyRecorder({ value, onChange, theme }: HotkeyRecorderProps) 
   return (
     <div ref={containerRef} className="flex gap-1.5 w-full">
       <div
-        className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md text-sm font-mono transition-colors flex items-center"
+        className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md fs-lg font-mono transition-colors flex items-center"
         style={{
           background: recording ? `${theme.accent}14` : theme.settingsInputBg,
           color: showLivePreview
@@ -194,7 +194,7 @@ export function HotkeyRecorder({ value, onChange, theme }: HotkeyRecorderProps) 
           setRecording((r) => !r);
           setPreview("");
         }}
-        className="px-2.5 py-1.5 rounded-md text-xs transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+        className="px-2.5 py-1.5 rounded-md fs-sm transition-colors shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
         style={{
           background: recording ? theme.accent : theme.settingsInputBg,
           color: recording ? "#ffffff" : theme.settingsInputText,

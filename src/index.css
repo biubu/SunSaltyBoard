@@ -59,6 +59,44 @@
     background: linear-gradient(145deg, #475569, #64748b);
   }
 
+  /* Font size scale levels */
+:root,
+[data-font-size="3"] {
+  --fs-xs: 9px;
+  --fs-sm: 11px;
+  --fs-base: 13px;
+  --fs-lg: 14px;
+}
+[data-font-size="1"] {
+  --fs-xs: 7px;
+  --fs-sm: 9px;
+  --fs-base: 11px;
+  --fs-lg: 12px;
+}
+[data-font-size="2"] {
+  --fs-xs: 8px;
+  --fs-sm: 10px;
+  --fs-base: 12px;
+  --fs-lg: 13px;
+}
+[data-font-size="4"] {
+  --fs-xs: 10px;
+  --fs-sm: 12px;
+  --fs-base: 14px;
+  --fs-lg: 15px;
+}
+[data-font-size="5"] {
+  --fs-xs: 11px;
+  --fs-sm: 13px;
+  --fs-base: 15px;
+  --fs-lg: 16px;
+}
+
+.fs-xs { font-size: var(--fs-xs); }
+.fs-sm { font-size: var(--fs-sm); }
+.fs-base { font-size: var(--fs-base); }
+.fs-lg { font-size: var(--fs-lg); }
+
   /* Title bar drag region (Tauri's window drag.js reads this attribute;
      the CSS rules below are a redundant hint for WebKit-based webviews). */
   [data-tauri-drag-region] {

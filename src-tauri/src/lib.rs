@@ -526,7 +526,7 @@ pub fn run() {
             setup_tray(app)?;
 
             let state = app.state::<AppState>();
-            state.clipboard_manager.start(app_handle.clone());
+            state.clipboard_manager.start(app_handle.clone(), state.settings.clone());
             state.sync_manager.start(app_handle.clone());
 
             // Register global shortcut from settings

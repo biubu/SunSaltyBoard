@@ -410,6 +410,14 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
             db.set_setting("update_server_url", url)
                 .map_err(|e| e.to_string())?;
         }
+        db.set_setting("clipboard_poll_interval_ms", &settings.clipboard_poll_interval_ms.to_string())
+            .map_err(|e| e.to_string())?;
+        db.set_setting("clipboard_monitor_enabled", &settings.clipboard_monitor_enabled.to_string())
+            .map_err(|e| e.to_string())?;
+        db.set_setting("clipboard_monitor_mode", &settings.clipboard_monitor_mode)
+            .map_err(|e| e.to_string())?;
+        db.set_setting("font_size", &settings.font_size.to_string())
+            .map_err(|e| e.to_string())?;
     }
 
     // 2. Apply side-effects

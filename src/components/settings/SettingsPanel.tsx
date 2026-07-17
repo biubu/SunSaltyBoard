@@ -129,7 +129,7 @@ function Card({
             <Icon name={iconName} />
           </span>
           <span
-            className="text-xs font-semibold tracking-wider uppercase"
+            className="fs-sm font-semibold tracking-wider uppercase"
             style={{ color: theme.settingsTitle }}
           >
             {title}
@@ -137,7 +137,7 @@ function Card({
         </div>
         {subtitle && (
           <div
-            className="text-[11px] mt-0.5 leading-relaxed"
+            className="fs-sm mt-0.5 leading-relaxed"
             style={{ color: theme.settingsHint }}
           >
             {subtitle}
@@ -163,14 +163,14 @@ function Field({
   return (
     <div>
       <div
-        className="text-[13px] font-medium leading-snug"
+        className="fs-base font-medium leading-snug"
         style={{ color: theme.settingsLabel }}
       >
         {label}
       </div>
       {description && (
         <div
-          className="text-[11px] mt-1 leading-relaxed"
+          className="fs-sm mt-1 leading-relaxed"
           style={{ color: theme.settingsHint }}
         >
           {description}
@@ -253,7 +253,7 @@ export function SettingsPanel({
             <Icon name="back" />
           </button>
           <span
-            className="text-sm font-semibold tracking-wide"
+            className="fs-lg font-semibold tracking-wide"
             style={{ color: theme.titleText }}
           >
             设置
@@ -293,7 +293,7 @@ export function SettingsPanel({
                 updateDraft({ max_history_size: Number(e.target.value) || 0 })
               }
               onBlur={() => commitDraft(draft)}
-              className="w-24 px-2.5 py-1.5 rounded-md text-sm outline-none text-right transition-shadow focus:ring-2 focus:ring-blue-500/30"
+              className="w-24 px-2.5 py-1.5 rounded-md fs-lg outline-none text-right transition-shadow focus:ring-2 focus:ring-blue-500/30"
               style={{
                 background: theme.settingsInputBg,
                 color: theme.settingsInputText,
@@ -347,6 +347,94 @@ export function SettingsPanel({
           </Field>
         </Card>
 
+        {/* Clipboard Monitor */}
+        <Card
+          title="剪贴板监控"
+          subtitle="剪贴板轮询与远程桌面兼容"
+          iconName="behavior"
+          theme={theme}
+        >
+          <Field
+            label="启用监控"
+            description="关闭后不读取系统剪贴板"
+            theme={theme}
+          >
+            <Toggle
+              checked={draft.clipboard_monitor_enabled}
+              onChange={(v) =>
+                applyImmediate({ ...draft, clipboard_monitor_enabled: v })
+              }
+              theme={theme}
+            />
+          </Field>
+          <Field
+            label="轮询间隔(ms)"
+            description="每隔多少毫秒检查一次剪贴板变化 (200–10000)"
+            theme={theme}
+          >
+            <input
+              type="number"
+              value={draft.clipboard_poll_interval_ms}
+              min={200}
+              max={10000}
+              step={100}
+              onChange={(e) =>
+                updateDraft({
+                  clipboard_poll_interval_ms: Number(e.target.value) || 2000,
+                })
+              }
+              onBlur={() => commitDraft(draft)}
+              className="w-24 px-2.5 py-1.5 rounded-md fs-lg outline-none text-right transition-shadow focus:ring-2 focus:ring-blue-500/30"
+              style={{
+                background: theme.settingsInputBg,
+                color: theme.settingsInputText,
+                border: `1px solid ${theme.settingsInputBorder}`,
+              }}
+            />
+          </Field>
+          <Field
+            label="监控模式"
+            description="自适应: 远程桌面下暂停读取 · 始终轮询: 传统模式"
+            theme={theme}
+          >
+            <div
+              className="inline-flex rounded-md overflow-hidden border fs-sm"
+              style={{ borderColor: theme.settingsInputBorder }}
+            >
+              {[
+                { v: "adaptive", label: "自适应" },
+                { v: "poll", label: "始终轮询" },
+              ].map((opt, idx) => {
+                const active = draft.clipboard_monitor_mode === opt.v;
+                return (
+                  <button
+                    key={opt.v}
+                    onClick={() =>
+                      applyImmediate({
+                        ...draft,
+                        clipboard_monitor_mode: opt.v,
+                      })
+                    }
+                    className="px-3 py-1.5 transition-colors"
+                    style={{
+                      background: active
+                        ? theme.accent
+                        : theme.settingsInputBg,
+                      color: active ? "#ffffff" : theme.settingsInputText,
+                      borderLeft:
+                        idx > 0
+                          ? `1px solid ${theme.settingsInputBorder}`
+                          : "none",
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        </Card>
+
         {/* Appearance */}
         <Card
           title="外观"
@@ -354,9 +442,50 @@ export function SettingsPanel({
           iconName="appearance"
           theme={theme}
         >
+          {/* Font Size */}
+          <div className="mb-1">
+            <div className="fs-base font-medium leading-snug" style={{ color: theme.settingsLabel }}>
+              字体大小
+            </div>
+            <div className="mt-2 px-1">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="leading-none" style={{ color: theme.settingsHint, fontSize: 10 }}>A</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  step={1}
+                  value={draft.font_size}
+                  onChange={(e) => {
+                    updateDraft({ font_size: Number(e.target.value) });
+                  }}
+                  className="flex-1 h-1.5 rounded-full appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, ${theme.accent} 0%, ${theme.accent} ${(draft.font_size - 1) * 25}%, ${theme.settingsInputBorder} ${(draft.font_size - 1) * 25}%, ${theme.settingsInputBorder} 100%)`,
+                    WebkitAppearance: "none",
+                    accentColor: theme.accent,
+                  }}
+                />
+                <span className="leading-none" style={{ color: theme.settingsHint, fontSize: 18 }}>A</span>
+              </div>
+              <div className="flex justify-between px-0.5">
+                {["极小", "小", "默认", "大", "极大"].map((label, i) => (
+                  <span
+                    key={label}
+                    className="fs-xs"
+                    style={{
+                      color: draft.font_size === i + 1 ? theme.accent : theme.settingsHint,
+                    }}
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
           <Field label="主题" theme={theme}>
             <div
-              className="inline-flex rounded-md overflow-hidden border text-xs"
+              className="inline-flex rounded-md overflow-hidden border fs-sm"
               style={{ borderColor: theme.settingsInputBorder }}
             >
               {[

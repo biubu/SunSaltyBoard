@@ -7,7 +7,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use sha2::{Digest, Sha256};
 
 use crate::database::ClipboardItem;
-use crate::AppState;
+use crate::{AppState, Settings};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -91,7 +91,7 @@ impl ClipboardManager {
         }
     }
 
-    pub fn start(&self, app_handle: AppHandle) {
+    pub fn start(&self, app_handle: AppHandle, settings: Arc<Mutex<Settings>>) {
         let running = self.running.clone();
         let last_text = self.last_text.clone();
         let last_image = self.last_image.clone();
@@ -115,7 +115,47 @@ impl ClipboardManager {
                 }
             };
 
+            let mut remote_detected = false;
+
             while running.load(Ordering::SeqCst) {
+                let poll_interval_ms = settings
+                    .lock()
+                    .ok()
+                    .map(|s| s.clipboard_poll_interval_ms.max(200))
+                    .unwrap_or(2000) as u64;
+
+                let monitor_enabled = settings
+                    .lock()
+                    .ok()
+                    .map(|s| s.clipboard_monitor_enabled)
+                    .unwrap_or(true);
+
+                if !monitor_enabled {
+                    thread::sleep(Duration::from_millis(poll_interval_ms));
+                    continue;
+                }
+
+                let mode = settings
+                    .lock()
+                    .ok()
+                    .map(|s| s.clipboard_monitor_mode.clone())
+                    .unwrap_or_default();
+
+                let is_remote = mode == "adaptive" && is_remote_session();
+                if is_remote != remote_detected {
+                    remote_detected = is_remote;
+                    if is_remote {
+                        log::info!("Remote desktop session detected; clipboard reads suspended");
+                    } else {
+                        log::info!("Remote desktop session ended; clipboard reads resumed");
+                    }
+                }
+
+                if is_remote {
+                    thread::sleep(Duration::from_millis(poll_interval_ms.max(5000)));
+                    continue;
+                }
+
                 let mut got_content = false;
 
                 if let Ok(image) = clipboard.get_image() {
@@ -164,9 +204,6 @@ impl ClipboardManager {
 
                             emit_and_store(&app_handle, &event);
 
-                            // Suppress the plain-text echo that arboard will also produce
-                            // for HTML clipboard payloads, so we don't capture the same
-                            // content twice (once as html, once as text).
                             if !preview.is_empty() {
                                 if let Ok(mut writes) = self_writes.lock() {
                                     let now_ms = SystemTime::now()
@@ -207,9 +244,9 @@ impl ClipboardManager {
                 }
 
                 if !got_content {
-                    thread::sleep(Duration::from_millis(500));
+                    thread::sleep(Duration::from_millis(poll_interval_ms));
                 } else {
-                    thread::sleep(Duration::from_millis(200));
+                    thread::sleep(Duration::from_millis(poll_interval_ms.min(500)));
                 }
             }
 
@@ -383,6 +420,22 @@ fn emit_and_store(app_handle: &AppHandle, event: &ClipboardEvent) {
                 log::error!("Failed to emit clipboard event: {}", e);
             }
         }
+    }
+}
+
+fn is_remote_session() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::env::var("RDP_SESSION").is_ok()
+            || std::env::var("SSH_CONNECTION").is_ok()
+            || std::env::var("SSH_CLIENT").is_ok()
+            || std::env::var("VNC_DESKTOP").is_ok()
+            || std::env::var("VNCSESSIONID").is_ok()
+            || std::env::var("REMOTE_HOST").is_ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
     }
 }
 

@@ -25,6 +25,10 @@ export interface Settings {
   sync_server: string | null;
   theme: string;
   update_server_url: string | null;
+  clipboard_monitor_enabled: boolean;
+  clipboard_poll_interval_ms: number;
+  clipboard_monitor_mode: string;
+  font_size: number;
 }
 
 export interface UpdateInfo {

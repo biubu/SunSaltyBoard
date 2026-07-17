@@ -94,6 +94,10 @@ impl Database {
                 let val = get_setting("update_server_url", "");
                 if val.is_empty() { None } else { Some(val) }
             },
+            clipboard_monitor_enabled: get_setting("clipboard_monitor_enabled", "true") == "true",
+            clipboard_poll_interval_ms: get_setting("clipboard_poll_interval_ms", "2000").parse().unwrap_or(2000),
+            clipboard_monitor_mode: get_setting("clipboard_monitor_mode", "adaptive"),
+            font_size: get_setting("font_size", "3").parse().unwrap_or(3),
         }
     }
 

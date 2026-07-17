@@ -124,7 +124,7 @@ export function ClipboardList({ theme }: ClipboardListProps) {
   if (isLoading && items.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-sm" style={{ color: emptyText }}>加载中...</div>
+        <div className="fs-lg" style={{ color: emptyText }}>加载中...</div>
       </div>
     );
   }
@@ -135,8 +135,8 @@ export function ClipboardList({ theme }: ClipboardListProps) {
         className="flex flex-col items-center justify-center h-full"
         style={{ color: emptyText }}
       >
-        <p className="text-sm">暂无剪贴历史</p>
-        <p className="text-xs mt-1">复制内容后将自动记录</p>
+        <p className="fs-lg">暂无剪贴历史</p>
+        <p className="fs-sm mt-1">复制内容后将自动记录</p>
       </div>
     );
   }
@@ -191,14 +191,14 @@ export function ClipboardList({ theme }: ClipboardListProps) {
                 <div className="flex items-center gap-1.5 min-w-0">
                   {item.content_type !== "text" && (
                     <span
-                      className="shrink-0 text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded"
+                      className="shrink-0 fs-xs font-bold tracking-wider px-1.5 py-0.5 rounded"
                       style={{ color: badge.color, background: badge.bg }}
                     >
                       {badge.label}
                     </span>
                   )}
                   <p
-                    className="flex-1 text-[13px] leading-snug truncate min-w-0"
+                    className="flex-1 fs-base leading-snug truncate min-w-0"
                     style={{ color: theme.itemText }}
                   >
                     {truncateText(item.preview, 60)}
@@ -243,7 +243,7 @@ export function ClipboardList({ theme }: ClipboardListProps) {
                   </div>
                 </div>
                 <div
-                  className="text-[11px] leading-none"
+                  className="fs-sm leading-none"
                   style={{ color: theme.itemTime }}
                 >
                   {formatTimeAgo(item.created_at)}

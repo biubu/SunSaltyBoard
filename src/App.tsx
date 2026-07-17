@@ -119,7 +119,7 @@ function App() {
 
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" data-tauri-drag-region="deep" style={{ background: theme.bg }}>
+    <div className="h-screen flex flex-col overflow-hidden" data-tauri-drag-region="deep" data-font-size={settings?.font_size ?? 3} style={{ background: theme.bg }}>
       {/* Title Bar */}
       <header
         className="flex items-center justify-between px-4 py-3 border-b"
@@ -127,7 +127,7 @@ function App() {
         style={{ background: theme.headerBg, borderColor: theme.headerBorder }}
       >
         <div className="flex items-center gap-2" data-tauri-drag-region>
-          <span className="text-sm font-semibold tracking-wide" data-tauri-drag-region style={{ color: theme.titleText }}>SunSaltyBoard</span>
+          <span className="fs-lg font-semibold tracking-wide" data-tauri-drag-region style={{ color: theme.titleText }}>SunSaltyBoard</span>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -154,7 +154,7 @@ function App() {
 
       {/* Error toast */}
       {error && (
-        <div className="mx-4 mt-2 px-3 py-2 rounded-lg text-xs text-red-700 bg-red-50 border border-red-200 flex items-center justify-between shrink-0">
+        <div className="mx-4 mt-2 px-3 py-2 rounded-lg fs-sm text-red-700 bg-red-50 border border-red-200 flex items-center justify-between shrink-0">
           <span>{error}</span>
           <button onClick={clearError} className="ml-2 text-red-400 hover:text-red-600 font-bold">✕</button>
         </div>
@@ -183,7 +183,7 @@ function App() {
             >
               <button
                 onClick={() => setSelectedGroup(null)}
-                className="px-2.5 py-0.5 rounded-full text-xs whitespace-nowrap transition-colors"
+                className="px-2.5 py-0.5 rounded-full fs-sm whitespace-nowrap transition-colors"
                 style={{
                   background: !selectedGroup ? theme.groupActiveBg : "transparent",
                   color: !selectedGroup ? theme.groupActiveText : theme.groupText,
@@ -200,7 +200,7 @@ function App() {
                     e.preventDefault();
                     if (confirm(`删除分组 "${g.name}"？`)) deleteGroup(g.id);
                   }}
-                  className="px-2.5 py-0.5 rounded-full text-xs whitespace-nowrap transition-colors flex items-center gap-1"
+                  className="px-2.5 py-0.5 rounded-full fs-sm whitespace-nowrap transition-colors flex items-center gap-1"
                   style={{
                     background:
                       selectedGroup?.id === g.id ? theme.groupActiveBg : "transparent",
@@ -217,7 +217,7 @@ function App() {
               ))}
               <button
                 onClick={handleCreateGroup}
-                className="w-5 h-5 flex items-center justify-center rounded-full text-xs shrink-0 transition-colors"
+                className="w-5 h-5 flex items-center justify-center rounded-full fs-sm shrink-0 transition-colors"
                 style={{ color: theme.groupText }}
                 title="新建分组"
               >

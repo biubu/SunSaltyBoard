@@ -10,6 +10,10 @@ pub struct Settings {
     pub sync_server: Option<String>,
     pub theme: String,
     pub update_server_url: Option<String>,
+    pub clipboard_monitor_enabled: bool,
+    pub clipboard_poll_interval_ms: i32,
+    pub clipboard_monitor_mode: String,
+    pub font_size: i32,
 }
 
 impl Default for Settings {
@@ -23,6 +27,10 @@ impl Default for Settings {
             sync_server: None,
             theme: "dark".to_string(),
             update_server_url: None,
+            clipboard_monitor_enabled: true,
+            clipboard_poll_interval_ms: 2000,
+            clipboard_monitor_mode: "adaptive".to_string(),
+            font_size: 3,
         }
     }
 }
