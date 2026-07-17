@@ -1,10 +1,14 @@
-import { create } from "zustand";
-import type {
-  ClipboardItem,
-  Group,
-  Settings,
-} from "../types";
-import * as api from "../services/api";
+// Re-export individual stores
+export { useClipboardStore } from "./clipboard";
+export { useGroupsStore } from "./groups";
+export { useSettingsStore } from "./settings";
+
+// Legacy compatibility: unified store that combines all sub-stores
+// This maintains backward compatibility with existing components
+import { useClipboardStore } from "./clipboard";
+import { useGroupsStore } from "./groups";
+import { useSettingsStore } from "./settings";
+import type { ClipboardItem, Group, Settings } from "../types";
 
 interface AppStore {
   items: ClipboardItem[];
@@ -34,147 +38,47 @@ interface AppStore {
   clearError: () => void;
 }
 
-export const useStore = create<AppStore>((set, get) => ({
-  items: [],
-  groups: [],
-  settings: null,
-  selectedGroup: null,
-  searchQuery: "",
-  isLoading: false,
-  error: null,
+export function useStore(): AppStore {
+  const clipboard = useClipboardStore();
+  const groups = useGroupsStore();
+  const settings = useSettingsStore();
 
-  loadHistory: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const items = await api.getClipboardHistory(200, 0);
-      const sorted = [...items].sort((a, b) => {
-        if (a.is_favorite !== b.is_favorite) return a.is_favorite ? -1 : 1;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      });
-      set({ items: sorted, isLoading: false });
-    } catch (e) {
-      set({ error: String(e), isLoading: false });
-    }
-  },
+  return {
+    // Clipboard state
+    items: clipboard.items,
+    isLoading: clipboard.isLoading,
+    error: clipboard.error,
 
-  search: async (query: string) => {
-    if (!query.trim()) {
-      return get().loadHistory();
-    }
-    set({ isLoading: true, error: null });
-    try {
-      const items = await api.searchClipboard(query, 50);
-      const sorted = [...items].sort((a, b) => {
-        if (a.is_favorite !== b.is_favorite) return a.is_favorite ? -1 : 1;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      });
-      set({ items: sorted, isLoading: false });
-    } catch (e) {
-      set({ error: String(e), isLoading: false });
-    }
-  },
+    // Groups state
+    groups: groups.groups,
+    selectedGroup: groups.selectedGroup,
 
-  deleteItem: async (id: string) => {
-    try {
-      await api.deleteItem(id);
-      set((state) => ({
-        items: state.items.filter((item) => item.id !== id),
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
+    // Settings state
+    settings: settings.settings,
 
-  pasteToActive: async (item: ClipboardItem) => {
-    try {
-      await api.pasteToActive(item);
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
+    // Search query (local state in SearchBar, but exposed here for compatibility)
+    searchQuery: "",
 
-  toggleFavorite: async (id: string) => {
-    try {
-      const isFav = await api.toggleFavorite(id);
-      set((state) => ({
-        items: state.items.map((item) =>
-          item.id === id ? { ...item, is_favorite: isFav } : item
-        ),
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
+    // Clipboard actions
+    loadHistory: clipboard.loadHistory,
+    search: clipboard.search,
+    deleteItem: clipboard.deleteItem,
+    pasteToActive: clipboard.pasteToActive,
+    toggleFavorite: clipboard.toggleFavorite,
+    moveItemToGroup: clipboard.moveItemToGroup,
+    clearError: clipboard.clearError,
 
-  loadGroups: async () => {
-    try {
-      const groups = await api.getGroups();
-      set({ groups });
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
+    // Groups actions
+    loadGroups: groups.loadGroups,
+    createGroup: groups.createGroup,
+    deleteGroup: groups.deleteGroup,
+    setSelectedGroup: groups.setSelectedGroup,
 
-  createGroup: async (name: string, color: string) => {
-    try {
-      const group = await api.createGroup(name, color);
-      set((state) => ({ groups: [...state.groups, group] }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
+    // Settings actions
+    loadSettings: settings.loadSettings,
+    updateSettings: settings.updateSettings,
 
-  deleteGroup: async (id: string) => {
-    try {
-      await api.deleteGroup(id);
-      set((state) => ({
-        groups: state.groups.filter((g) => g.id !== id),
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
-  moveItemToGroup: async (itemId: string, groupId: string | null) => {
-    try {
-      await api.moveItemToGroup(itemId, groupId);
-      set((state) => ({
-        items: state.items.map((item) =>
-          item.id === itemId ? { ...item, group_id: groupId } : item
-        ),
-      }));
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
-  loadSettings: async () => {
-    try {
-      const settings = await api.getSettings();
-      set({ settings });
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
-  updateSettings: async (settings: Settings) => {
-    try {
-      await api.updateSettings(settings);
-      set({ settings });
-    } catch (e) {
-      set({ error: String(e) });
-    }
-  },
-
-  setSelectedGroup: (group) => {
-    set({ selectedGroup: group });
-    const state = get();
-    if (group) {
-      set({ items: state.items.filter((i) => i.group_id === group.id) });
-    } else {
-      state.loadHistory();
-    }
-  },
-  setSearchQuery: (query) => set({ searchQuery: query }),
-  clearError: () => set({ error: null }),
-}));
+    // Search query setter (no-op for compatibility)
+    setSearchQuery: () => {},
+  };
+}

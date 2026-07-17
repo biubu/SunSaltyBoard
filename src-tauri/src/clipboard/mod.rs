@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -53,6 +53,9 @@ pub struct ClipboardManager {
     /// Recent values we wrote to the OS clipboard ourselves, used to suppress
     /// the monitor from re-capturing our own paste actions.
     self_writes: Arc<Mutex<Vec<SelfWrite>>>,
+    /// Cached settings to avoid locking on every poll iteration.
+    cached_poll_interval_ms: Arc<AtomicU64>,
+    cached_monitor_enabled: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -70,6 +73,8 @@ impl ClipboardManager {
             last_image: Arc::new(Mutex::new(String::new())),
             last_html: Arc::new(Mutex::new(String::new())),
             self_writes: Arc::new(Mutex::new(Vec::new())),
+            cached_poll_interval_ms: Arc::new(AtomicU64::new(2000)),
+            cached_monitor_enabled: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -97,6 +102,8 @@ impl ClipboardManager {
         let last_image = self.last_image.clone();
         let last_html = self.last_html.clone();
         let self_writes = self.self_writes.clone();
+        let cached_poll_interval_ms = self.cached_poll_interval_ms.clone();
+        let cached_monitor_enabled = self.cached_monitor_enabled.clone();
 
         running.store(true, Ordering::SeqCst);
 
@@ -115,20 +122,27 @@ impl ClipboardManager {
                 }
             };
 
-            let mut remote_detected = false;
+            let mut remote_detected = is_remote_session();
+            let mut access_ok = true;
+            let mut recheck_counter = 0u64;
+            let mut settings_refresh_counter = 0u64;
+
+            if remote_detected {
+                log::info!("Remote desktop session detected at startup; clipboard reads suspended");
+            }
 
             while running.load(Ordering::SeqCst) {
-                let poll_interval_ms = settings
-                    .lock()
-                    .ok()
-                    .map(|s| s.clipboard_poll_interval_ms.max(200))
-                    .unwrap_or(2000) as u64;
+                // Refresh cached settings every 30 iterations (~60 seconds at 2s poll)
+                settings_refresh_counter += 1;
+                if settings_refresh_counter % 30 == 0 {
+                    if let Ok(s) = settings.lock() {
+                        cached_poll_interval_ms.store(s.clipboard_poll_interval_ms.max(200) as u64, Ordering::Relaxed);
+                        cached_monitor_enabled.store(s.clipboard_monitor_enabled, Ordering::Relaxed);
+                    }
+                }
 
-                let monitor_enabled = settings
-                    .lock()
-                    .ok()
-                    .map(|s| s.clipboard_monitor_enabled)
-                    .unwrap_or(true);
+                let poll_interval_ms = cached_poll_interval_ms.load(Ordering::Relaxed);
+                let monitor_enabled = cached_monitor_enabled.load(Ordering::Relaxed);
 
                 if !monitor_enabled {
                     thread::sleep(Duration::from_millis(poll_interval_ms));
@@ -141,105 +155,154 @@ impl ClipboardManager {
                     .map(|s| s.clipboard_monitor_mode.clone())
                     .unwrap_or_default();
 
-                let is_remote = mode == "adaptive" && is_remote_session();
-                if is_remote != remote_detected {
-                    remote_detected = is_remote;
-                    if is_remote {
-                        log::info!("Remote desktop session detected; clipboard reads suspended");
-                    } else {
-                        log::info!("Remote desktop session ended; clipboard reads resumed");
+                // Re-evaluate remote status periodically (every 60 iterations)
+                // to detect when a remote desktop session ends while still
+                // respecting env-var-based detection every iteration.
+                recheck_counter += 1;
+                let is_remote = if mode == "adaptive" {
+                    if recheck_counter % 60 == 0 {
+                        let fresh = is_remote_session();
+                        if fresh != remote_detected {
+                            remote_detected = fresh;
+                            access_ok = !fresh;
+                            if fresh {
+                                log::info!("Remote desktop session detected; clipboard reads suspended");
+                            } else {
+                                log::info!("Remote desktop session ended; clipboard reads resumed");
+                            }
+                        }
                     }
-                }
+                    remote_detected
+                } else {
+                    false
+                };
 
-                if is_remote {
-                    thread::sleep(Duration::from_millis(poll_interval_ms.max(5000)));
+                if is_remote || !access_ok {
+                    let sleep_ms = poll_interval_ms.max(5000);
+                    thread::sleep(Duration::from_millis(sleep_ms));
                     continue;
                 }
 
                 let mut got_content = false;
 
-                if let Ok(image) = clipboard.get_image() {
-                    let rgba_b64 = STANDARD.encode(&image.bytes);
-                    let mut hasher = Sha256::new();
-                    hasher.update(&image.bytes);
-                    let image_hash = format!("{:x}", hasher.finalize());
-                    let image_key = format!("{}x{}:{}", image.width, image.height, image_hash);
-                    let mut last = last_image.lock().unwrap();
-                    if *last != image_key {
-                        if !is_self_write(&self_writes, "image", &rgba_b64) {
-                            let metadata = serde_json::json!({
-                                "width": image.width,
-                                "height": image.height,
-                                "format": "rgba",
-                                "sha256": image_hash,
-                            }).to_string();
+                match clipboard.get_image() {
+                    Ok(image) => {
+                        access_ok = true;
+                        let rgba_b64 = STANDARD.encode(&image.bytes);
+                        let mut hasher = Sha256::new();
+                        hasher.update(&image.bytes);
+                        let image_hash = format!("{:x}", hasher.finalize());
+                        let image_key = format!("{}x{}:{}", image.width, image.height, image_hash);
+                        let mut last = last_image.lock().unwrap();
+                        if *last != image_key {
+                            if !is_self_write(&self_writes, "image", &rgba_b64) {
+                                let metadata = serde_json::json!({
+                                    "width": image.width,
+                                    "height": image.height,
+                                    "format": "rgba",
+                                    "sha256": image_hash,
+                                }).to_string();
 
-                            let event = ClipboardEvent {
-                                content_type: ClipboardContentType::Image.as_str().to_string(),
-                                content: rgba_b64.clone(),
-                                preview: format!("Image {}x{}", image.width, image.height),
-                                metadata: Some(metadata),
-                            };
+                                let event = ClipboardEvent {
+                                    content_type: ClipboardContentType::Image.as_str().to_string(),
+                                    content: rgba_b64.clone(),
+                                    preview: format!("Image {}x{}", image.width, image.height),
+                                    metadata: Some(metadata),
+                                };
 
-                            emit_and_store(&app_handle, &event);
+                                emit_and_store(&app_handle, &event);
+                            }
+                            *last = image_key;
+                            got_content = true;
                         }
-                        *last = image_key;
-                        got_content = true;
+                    }
+                    Err(e) => {
+                        log::debug!("get_image failed: {}", e);
+                        if mode == "adaptive" {
+                            access_ok = false;
+                            remote_detected = true;
+                            log::warn!("Clipboard read denied; treating as remote session");
+                            continue;
+                        }
                     }
                 }
 
-                if let Ok(html) = clipboard.get().html() {
-                    let mut last = last_html.lock().unwrap();
-                    if *last != html {
-                        if !is_self_write(&self_writes, "html", &html) {
-                            let stripped = strip_html_tags(&html);
-                            let preview: String = stripped.chars().take(200).collect();
+                match clipboard.get().html() {
+                    Ok(html) => {
+                        access_ok = true;
+                        let mut last = last_html.lock().unwrap();
+                        if *last != html {
+                            if !is_self_write(&self_writes, "html", &html) {
+                                let stripped = strip_html_tags(&html);
+                                let preview: String = stripped.chars().take(200).collect();
 
-                            let event = ClipboardEvent {
-                                content_type: ClipboardContentType::Html.as_str().to_string(),
-                                content: html.clone(),
-                                preview: preview.clone(),
-                                metadata: None,
-                            };
+                                let event = ClipboardEvent {
+                                    content_type: ClipboardContentType::Html.as_str().to_string(),
+                                    content: html.clone(),
+                                    preview: preview.clone(),
+                                    metadata: None,
+                                };
 
-                            emit_and_store(&app_handle, &event);
+                                emit_and_store(&app_handle, &event);
 
-                            if !preview.is_empty() {
-                                if let Ok(mut writes) = self_writes.lock() {
-                                    let now_ms = SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .map(|d| d.as_millis())
-                                        .unwrap_or(0);
-                                    writes.retain(|w| w.expires_at_ms > now_ms);
-                                    writes.push(SelfWrite {
-                                        content_type: "text".to_string(),
-                                        content_hash: content_fingerprint("text", &stripped),
-                                        expires_at_ms: now_ms + 5_000,
-                                    });
+                                if !preview.is_empty() {
+                                    if let Ok(mut writes) = self_writes.lock() {
+                                        let now_ms = SystemTime::now()
+                                            .duration_since(UNIX_EPOCH)
+                                            .map(|d| d.as_millis())
+                                            .unwrap_or(0);
+                                        writes.retain(|w| w.expires_at_ms > now_ms);
+                                        writes.push(SelfWrite {
+                                            content_type: "text".to_string(),
+                                            content_hash: content_fingerprint("text", &stripped),
+                                            expires_at_ms: now_ms + 5_000,
+                                        });
+                                    }
                                 }
                             }
+                            *last = html;
+                            got_content = true;
                         }
-                        *last = html;
-                        got_content = true;
+                    }
+                    Err(e) => {
+                        log::debug!("get.html failed: {}", e);
+                        if mode == "adaptive" {
+                            access_ok = false;
+                            remote_detected = true;
+                            log::warn!("Clipboard HTML read denied; treating as remote session");
+                            continue;
+                        }
                     }
                 }
 
-                if let Ok(text) = clipboard.get_text() {
-                    let mut last = last_text.lock().unwrap();
-                    if *last != text {
-                        if !is_self_write(&self_writes, "text", &text) {
-                            let preview = text.chars().take(200).collect::<String>();
-                            let event = ClipboardEvent {
-                                content_type: ClipboardContentType::Text.as_str().to_string(),
-                                content: text.clone(),
-                                preview,
-                                metadata: None,
-                            };
+                match clipboard.get_text() {
+                    Ok(text) => {
+                        access_ok = true;
+                        let mut last = last_text.lock().unwrap();
+                        if *last != text {
+                            if !is_self_write(&self_writes, "text", &text) {
+                                let preview = text.chars().take(200).collect::<String>();
+                                let event = ClipboardEvent {
+                                    content_type: ClipboardContentType::Text.as_str().to_string(),
+                                    content: text.clone(),
+                                    preview,
+                                    metadata: None,
+                                };
 
-                            emit_and_store(&app_handle, &event);
+                                emit_and_store(&app_handle, &event);
+                            }
+                            *last = text;
+                            got_content = true;
                         }
-                        *last = text;
-                        got_content = true;
+                    }
+                    Err(e) => {
+                        log::debug!("get_text failed: {}", e);
+                        if mode == "adaptive" {
+                            access_ok = false;
+                            remote_detected = true;
+                            log::warn!("Clipboard text read denied; treating as remote session");
+                            continue;
+                        }
                     }
                 }
 
@@ -426,12 +489,65 @@ fn emit_and_store(app_handle: &AppHandle, event: &ClipboardEvent) {
 fn is_remote_session() -> bool {
     #[cfg(target_os = "linux")]
     {
-        std::env::var("RDP_SESSION").is_ok()
+        // Environment variable checks
+        if std::env::var("RDP_SESSION").is_ok()
             || std::env::var("SSH_CONNECTION").is_ok()
             || std::env::var("SSH_CLIENT").is_ok()
             || std::env::var("VNC_DESKTOP").is_ok()
             || std::env::var("VNCSESSIONID").is_ok()
             || std::env::var("REMOTE_HOST").is_ok()
+            || std::env::var("XRDP_SESSION").is_ok()
+            || std::env::var("PAM_TYPE")
+                .map(|v| v == "remote")
+                .unwrap_or(false)
+        {
+            return true;
+        }
+
+        // DISPLAY check: xrdp uses :1, :10, :11 etc. while local is usually :0
+        if let Ok(display) = std::env::var("DISPLAY") {
+            let d = display.trim();
+            if !d.is_empty()
+                && d != ":0"
+                && d != ":0.0"
+                && !d.starts_with(":0.")
+            {
+                return true;
+            }
+        }
+
+        // One-shot pgrep check for common remote desktop daemons.
+        // We check once and rely on internal caching in the caller loop.
+        {
+            use std::sync::atomic::AtomicU8;
+            use std::sync::atomic::Ordering as AtomicOrdering;
+            static REMOTE_DAEMON_CHECKED: AtomicU8 = AtomicU8::new(0);
+            // 0 = unchecked, 1 = found, 2 = not found
+
+            let cached = REMOTE_DAEMON_CHECKED.load(AtomicOrdering::Relaxed);
+            if cached == 1 {
+                return true;
+            }
+            if cached == 0 {
+                let found = ["xrdp", "xrdp-sesman", "vino-server", "grd", "gnome-remote-desktop"]
+                    .iter()
+                    .any(|name| {
+                        std::process::Command::new("pgrep")
+                            .arg("-x")
+                            .arg(name)
+                            .output()
+                            .map(|o| o.status.success())
+                            .unwrap_or(false)
+                    });
+                REMOTE_DAEMON_CHECKED.store(if found { 1 } else { 2 }, AtomicOrdering::Relaxed);
+                if found {
+                    log::info!("Remote desktop daemon detected via pgrep");
+                    return true;
+                }
+            }
+        }
+
+        false
     }
     #[cfg(not(target_os = "linux"))]
     {

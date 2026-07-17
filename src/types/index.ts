@@ -1,6 +1,8 @@
+export type ContentType = "text" | "image" | "file" | "html" | "rtf" | "unknown";
+
 export interface ClipboardItem {
   id: string;
-  content_type: string;
+  content_type: ContentType;
   content: string;
   preview: string;
   group_id: string | null;

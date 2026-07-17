@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use crate::commands::HTTP_CLIENT;
+use crate::commands::http_client;
 use crate::database::ClipboardItem;
 use crate::AppState;
 use tauri::AppHandle;
@@ -123,7 +123,7 @@ impl SyncManager {
     async fn sync_http(url: &str, auth_token: Option<&str>, payload: &SyncPayload) -> Result<(), String> {
         log::info!("Syncing {} items to {}", payload.items.len(), url);
 
-        let mut req = HTTP_CLIENT.post(url).json(payload);
+        let mut req = http_client().post(url).json(payload);
         if let Some(tok) = auth_token {
             if !tok.is_empty() {
                 req = req.bearer_auth(tok);

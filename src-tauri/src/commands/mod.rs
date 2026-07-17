@@ -2,16 +2,20 @@ use crate::database::{ClipboardItem, Group, Hotkey, Tag};
 use crate::settings::Settings;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::{command, AppHandle, Manager, State};
 
 /// Shared HTTP client with connection pooling.
-pub(crate) static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> = once_cell::sync::Lazy::new(|| {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .expect("failed to build reqwest client")
-});
+pub(crate) fn http_client() -> &'static reqwest::Client {
+    static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("failed to build reqwest client")
+    })
+}
 
 #[command]
 pub fn get_clipboard_history(
@@ -203,10 +207,7 @@ fn paste_clipboard_item(
     }
 
     if result.is_err() {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
+        log::warn!("Paste simulation failed: {}. Window stays hidden; user can reopen via shortcut.", result.as_ref().unwrap_err());
     }
 
     result
@@ -390,34 +391,27 @@ pub fn update_settings(state: State<'_, AppState>, settings: Settings) -> Result
     // Snapshot old settings BEFORE writing
     let old = state.settings.lock().map_err(|e| e.to_string())?.clone();
 
-    // 1. Persist to DB
+    // 1. Persist to DB (batch in single transaction)
     {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.set_setting("max_history_size", &settings.max_history_size.to_string())
-            .map_err(|e| e.to_string())?;
-        db.set_setting("auto_start", &settings.auto_start.to_string())
-            .map_err(|e| e.to_string())?;
-        db.set_setting("minimize_to_tray", &settings.minimize_to_tray.to_string())
-            .map_err(|e| e.to_string())?;
-        db.set_setting("global_shortcut", &settings.global_shortcut)
-            .map_err(|e| e.to_string())?;
-        db.set_setting("sync_enabled", &settings.sync_enabled.to_string())
-            .map_err(|e| e.to_string())?;
-        db.set_setting("sync_server", settings.sync_server.as_deref().unwrap_or(""))
-            .map_err(|e| e.to_string())?;
-        db.set_setting("theme", &settings.theme).map_err(|e| e.to_string())?;
+        let pairs = vec![
+            ("max_history_size".to_string(), settings.max_history_size.to_string()),
+            ("auto_start".to_string(), settings.auto_start.to_string()),
+            ("minimize_to_tray".to_string(), settings.minimize_to_tray.to_string()),
+            ("global_shortcut".to_string(), settings.global_shortcut.clone()),
+            ("sync_enabled".to_string(), settings.sync_enabled.to_string()),
+            ("sync_server".to_string(), settings.sync_server.clone().unwrap_or_default()),
+            ("theme".to_string(), settings.theme.clone()),
+            ("clipboard_poll_interval_ms".to_string(), settings.clipboard_poll_interval_ms.to_string()),
+            ("clipboard_monitor_enabled".to_string(), settings.clipboard_monitor_enabled.to_string()),
+            ("clipboard_monitor_mode".to_string(), settings.clipboard_monitor_mode.clone()),
+            ("font_size".to_string(), settings.font_size.to_string()),
+        ];
+        let mut pairs = pairs;
         if let Some(ref url) = settings.update_server_url {
-            db.set_setting("update_server_url", url)
-                .map_err(|e| e.to_string())?;
+            pairs.push(("update_server_url".to_string(), url.clone()));
         }
-        db.set_setting("clipboard_poll_interval_ms", &settings.clipboard_poll_interval_ms.to_string())
-            .map_err(|e| e.to_string())?;
-        db.set_setting("clipboard_monitor_enabled", &settings.clipboard_monitor_enabled.to_string())
-            .map_err(|e| e.to_string())?;
-        db.set_setting("clipboard_monitor_mode", &settings.clipboard_monitor_mode)
-            .map_err(|e| e.to_string())?;
-        db.set_setting("font_size", &settings.font_size.to_string())
-            .map_err(|e| e.to_string())?;
+        db.set_settings_batch(&pairs).map_err(|e| e.to_string())?;
     }
 
     // 2. Apply side-effects
@@ -522,8 +516,8 @@ pub fn get_mouse_position() -> Result<MousePosition, String> {
 
 // App version & updates
 #[command]
-pub fn get_app_version() -> Result<String, String> {
-    Ok(env!("CARGO_PKG_VERSION").to_string())
+pub fn get_app_version(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(app.package_info().version.to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -615,7 +609,7 @@ pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo, Stri
         current_version
     );
 
-    match HTTP_CLIENT
+    match http_client()
         .get(&endpoint)
         .timeout(Duration::from_secs(10))
         .send()
@@ -653,7 +647,7 @@ pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo, Stri
 async fn check_github_release(owner: &str, repo: &str) -> UpdateInfo {
     let api_url = format!("https://api.github.com/repos/{}/{}/releases/latest", owner, repo);
 
-    match HTTP_CLIENT
+    match http_client()
         .get(&api_url)
         .header("User-Agent", "SunSaltyBoard")
         .header("Accept", "application/vnd.github+json")

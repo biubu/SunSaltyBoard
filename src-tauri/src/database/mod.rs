@@ -540,4 +540,18 @@ impl Database {
         )?;
         Ok(())
     }
+
+    pub fn set_settings_batch(&self, settings: &[(String, String)]) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            )?;
+            for (key, value) in settings {
+                stmt.execute(params![key, value])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }

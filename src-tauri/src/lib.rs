@@ -2,6 +2,7 @@ mod autostart;
 mod clipboard;
 mod commands;
 mod database;
+mod error;
 mod settings;
 mod sync;
 
@@ -33,9 +34,10 @@ pub struct AppState {
 
 fn create_tray_menu(app: &tauri::App) -> tauri::Result<Menu<tauri::Wry>> {
     let show = MenuItem::with_id(app, "show", "显示", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "关于", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
 
-    Menu::with_items(app, &[&show, &quit])
+    Menu::with_items(app, &[&show, &about, &quit])
 }
 
 #[cfg(target_os = "macos")]
@@ -93,6 +95,15 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
                     show_window_near_mouse(&window);
+                }
+            }
+            "about" => {
+                let version = app.package_info().version.to_string();
+                let js = format!("alert('SunSaltyBoard v{}\\n\\n简易剪贴板管理器')", version);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.eval(&js);
                 }
             }
             "quit" => {
@@ -389,9 +400,7 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
         let enigo = match enigo::Enigo::new(&enigo::Settings::default()) {
             Ok(e) => e,
             Err(_) => {
-                let _ = window.center();
-                let _ = window.show();
-                let _ = window.set_focus();
+                log::warn!("enigo init failed (remote desktop?), skipping show");
                 return;
             }
         };
@@ -405,9 +414,7 @@ fn show_window_near_mouse(window: &tauri::WebviewWindow) {
                 (mx, my, screen.0, screen.1, screen.2, screen.3)
             }
             Err(_) => {
-                let _ = window.center();
-                let _ = window.show();
-                let _ = window.set_focus();
+                log::warn!("enigo location failed (remote desktop?), skipping show");
                 return;
             }
         }

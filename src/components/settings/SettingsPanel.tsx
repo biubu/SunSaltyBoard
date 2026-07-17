@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Settings } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
+import { getAppVersion } from "../../services/api";
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -88,6 +89,14 @@ function Icon({ name }: { name: string }) {
         <svg {...common}>
           <line x1="19" y1="12" x2="5" y2="12" />
           <polyline points="12 19 5 12 12 5" />
+        </svg>
+      );
+    case "about":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
         </svg>
       );
     default:
@@ -188,9 +197,14 @@ export function SettingsPanel({
   onClose,
 }: SettingsPanelProps) {
   const [draft, setDraft] = useState<Settings>(settings);
+  const [appVersion, setAppVersion] = useState<string>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined
   );
+
+  useEffect(() => {
+    getAppVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   useEffect(() => {
     setDraft(settings);
@@ -433,6 +447,21 @@ export function SettingsPanel({
               })}
             </div>
           </Field>
+        </Card>
+
+        {/* About */}
+        <Card
+          title="关于"
+          subtitle=""
+          iconName="about"
+          theme={theme}
+        >
+          <div className="fs-sm leading-relaxed" style={{ color: theme.settingsLabel }}>
+            SunSaltyBoard v{appVersion || "..."}
+          </div>
+          <div className="fs-sm leading-relaxed" style={{ color: theme.settingsHint }}>
+            简易剪贴板管理器
+          </div>
         </Card>
 
         {/* Appearance */}

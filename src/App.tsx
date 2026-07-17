@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore } from "./store";
@@ -36,7 +36,7 @@ function App() {
       }
       // Skip reload if user is actively searching; the search query will
       // re-run via the debounced SearchBar.
-      if (useStore.getState().searchQuery.trim()) return;
+      // Note: searchQuery is managed locally in SearchBar component
       debounceTimer = window.setTimeout(() => {
         loadHistory();
       }, CLIPBOARD_RELOAD_DEBOUNCE_MS);
@@ -75,7 +75,7 @@ function App() {
 
   const isDark = settings?.theme === "dark";
 
-  const theme = {
+  const theme = useMemo(() => ({
     bg: isDark ? "#111827" : "#f3f4f6",
     headerBg: isDark ? "#1f2937" : "#ffffff",
     headerBorder: isDark ? "#374151" : "#e5e7eb",
@@ -115,7 +115,7 @@ function App() {
     groupActiveText: isDark ? "#93c5fd" : "#1d4ed8",
     groupActiveBorder: isDark ? "#3b82f6" : "#bfdbfe",
     emptyText: isDark ? "#9ca3af" : "#9ca3af",
-  };
+  }), [isDark]);
 
 
   return (

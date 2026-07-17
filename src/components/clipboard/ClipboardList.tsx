@@ -1,8 +1,8 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, memo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStore } from "../../store";
 import { formatTimeAgo, truncateText } from "../../utils";
-import type { ClipboardItem } from "../../types";
+import type { ClipboardItem, ContentType } from "../../types";
 
 const ITEM_HEIGHT = 56;
 
@@ -11,7 +11,7 @@ interface ClipboardListProps {
 }
 
 const TYPE_BADGE: Record<
-  string,
+  ContentType,
   { label: string; color: string; bg: string }
 > = {
   text: { label: "TEXT", color: "#60a5fa", bg: "rgba(59, 130, 246, 0.15)" },
@@ -19,6 +19,7 @@ const TYPE_BADGE: Record<
   image: { label: "IMG", color: "#c084fc", bg: "rgba(168, 85, 247, 0.15)" },
   file: { label: "FILE", color: "#fbbf24", bg: "rgba(245, 158, 11, 0.15)" },
   rtf: { label: "RTF", color: "#fb923c", bg: "rgba(249, 115, 22, 0.15)" },
+  unknown: { label: "UNK", color: "#9ca3af", bg: "rgba(156, 163, 175, 0.15)" },
 };
 
 function StarIcon({ filled }: { filled: boolean }) {
@@ -61,7 +62,7 @@ function TrashIcon() {
   );
 }
 
-export function ClipboardList({ theme }: ClipboardListProps) {
+export const ClipboardList = memo(function ClipboardList({ theme }: ClipboardListProps) {
   const { items, isLoading, deleteItem, pasteToActive, toggleFavorite } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -255,4 +256,4 @@ export function ClipboardList({ theme }: ClipboardListProps) {
       </div>
     </div>
   );
-}
+});
