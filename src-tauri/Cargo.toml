@@ -1,6 +1,6 @@
 [package]
 name = "SunSaltyBoard"
-version = "0.1.0"
+version = "26.8.0"
 description = "SunSaltyBoard - Windows Clipboard Manager"
 authors = ["you"]
 edition = "2021"

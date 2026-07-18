@@ -114,16 +114,7 @@ fn simulate_ctrl_v() -> Result<(), String> {
 fn macos_paste_target(
     state: &AppState,
 ) -> Result<objc2::rc::Retained<objc2_app_kit::NSRunningApplication>, String> {
-    #[link(name = "CoreGraphics", kind = "framework")]
-    unsafe extern "C" {
-        fn CGPreflightPostEventAccess() -> bool;
-        fn CGRequestPostEventAccess() -> bool;
-    }
-
-    let has_access = unsafe {
-        CGPreflightPostEventAccess() || CGRequestPostEventAccess()
-    };
-    if !has_access {
+    if !has_accessibility_permission() {
         return Err("需要辅助功能权限：请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 SunSaltyBoard，然后重试".to_string());
     }
 
@@ -214,6 +205,45 @@ pub fn paste_item(state: State<'_, AppState>, app: AppHandle, item: ClipboardIte
 pub fn paste_to_active(state: State<'_, AppState>, app: AppHandle, item: ClipboardItem) -> Result<(), String> {
     log::info!("Paste to active: {} of type {}", item.id, item.content_type);
     paste_clipboard_item(state.inner(), &app, item)
+}
+
+#[cfg(target_os = "macos")]
+fn has_accessibility_permission() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGPreflightPostEventAccess() -> bool;
+        fn CGRequestPostEventAccess() -> bool;
+    }
+    unsafe { CGPreflightPostEventAccess() || CGRequestPostEventAccess() }
+}
+
+#[command]
+pub fn check_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        has_accessibility_permission()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[command]
+pub fn open_accessibility_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+        Command::new("open")
+            .args(["x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"])
+            .output()
+            .map_err(|e| format!("打开系统设置失败: {}", e))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("此功能仅支持 macOS".to_string())
+    }
 }
 
 #[command]

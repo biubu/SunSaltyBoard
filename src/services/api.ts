@@ -62,6 +62,15 @@ export async function updateSettings(settings: Settings): Promise<void> {
   return invoke("update_settings", { settings });
 }
 
+// Accessibility (macOS)
+export async function checkAccessibilityPermission(): Promise<boolean> {
+  return invoke("check_accessibility_permission");
+}
+
+export async function openAccessibilitySettings(): Promise<void> {
+  return invoke("open_accessibility_settings");
+}
+
 // Updates
 export async function getAppVersion(): Promise<string> {
   return invoke("get_app_version");

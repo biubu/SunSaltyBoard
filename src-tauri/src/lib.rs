@@ -586,6 +586,8 @@ pub fn run() {
             commands::show_window,
             commands::hide_window,
             commands::get_mouse_position,
+            commands::check_accessibility_permission,
+            commands::open_accessibility_settings,
             commands::get_app_version,
             commands::check_update,
         ])

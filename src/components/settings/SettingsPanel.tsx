@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Settings } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
-import { getAppVersion } from "../../services/api";
+import { getAppVersion, checkAccessibilityPermission, openAccessibilitySettings } from "../../services/api";
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -89,6 +89,14 @@ function Icon({ name }: { name: string }) {
         <svg {...common}>
           <line x1="19" y1="12" x2="5" y2="12" />
           <polyline points="12 19 5 12 12 5" />
+        </svg>
+      );
+    case "warning":
+      return (
+        <svg {...common} width={16} height={16}>
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
         </svg>
       );
     case "about":
@@ -198,12 +206,17 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const [draft, setDraft] = useState<Settings>(settings);
   const [appVersion, setAppVersion] = useState<string>("");
+  const [hasAccessibilityPermission, setHasAccessibilityPermission] = useState(true);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined
   );
 
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    checkAccessibilityPermission().then(setHasAccessibilityPermission).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -286,6 +299,35 @@ export function SettingsPanel({
 
       {/* Settings Body (scrollable) */}
       <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
+        {!hasAccessibilityPermission && (
+          <div
+            className="rounded-xl border px-4 py-3 flex items-start gap-3"
+            style={{
+              background: "#fef3c7",
+              borderColor: "#f59e0b",
+            }}
+          >
+            <span style={{ color: "#d97706", marginTop: 2 }}>
+              <Icon name="warning" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <div className="fs-sm font-semibold" style={{ color: "#92400e" }}>
+                需要辅助功能权限
+              </div>
+              <div className="fs-xs mt-1" style={{ color: "#92400e" }}>
+                粘贴功能需要辅助功能权限。请在系统设置中允许 SunSaltyBoard，
+                然后重新尝试粘贴操作。
+              </div>
+              <button
+                onClick={() => openAccessibilitySettings()}
+                className="fs-xs mt-2 underline font-medium hover:no-underline"
+                style={{ color: "#d97706" }}
+              >
+                打开系统设置 → 隐私与安全性 → 辅助功能
+              </button>
+            </div>
+          </div>
+        )}
         {/* General */}
         <Card
           title="通用"
