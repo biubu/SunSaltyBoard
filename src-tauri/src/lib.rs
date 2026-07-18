@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
     WindowEvent,
 };
 use tauri_plugin_global_shortcut::Shortcut;
@@ -98,12 +98,10 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 }
             }
             "about" => {
-                let version = app.package_info().version.to_string();
-                let js = format!("alert('SunSaltyBoard v{}\\n\\n简易剪贴板管理器')", version);
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
-                    let _ = window.eval(&js);
+                    let _ = window.emit("show-about", ());
                 }
             }
             "quit" => {

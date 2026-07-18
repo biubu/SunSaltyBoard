@@ -54,10 +54,33 @@ function App() {
         console.error("Failed to listen for clipboard-changed:", e);
       });
 
+    let unlistenAbout: UnlistenFn | undefined;
+    let aboutPending = false;
+    listen("show-about", () => {
+      aboutPending = true;
+      setShowSettings(true);
+      setTimeout(() => { aboutPending = false; }, 200);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenAbout = fn;
+    });
+
+    let unlistenFocus: UnlistenFn | undefined;
+    listen("tauri://focus", () => {
+      if (!aboutPending) {
+        setShowSettings(false);
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlistenFocus = fn;
+    });
+
     return () => {
       cancelled = true;
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       unlistenFn?.();
+      unlistenAbout?.();
+      unlistenFocus?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -185,51 +185,8 @@ impl ClipboardManager {
 
                 let mut got_content = false;
 
-                match clipboard.get_image() {
-                    Ok(image) => {
-                        access_ok = true;
-                        let rgba_b64 = STANDARD.encode(&image.bytes);
-                        let mut hasher = Sha256::new();
-                        hasher.update(&image.bytes);
-                        let image_hash = format!("{:x}", hasher.finalize());
-                        let image_key = format!("{}x{}:{}", image.width, image.height, image_hash);
-                        let mut last = last_image.lock().unwrap();
-                        if *last != image_key {
-                            if !is_self_write(&self_writes, "image", &rgba_b64) {
-                                let metadata = serde_json::json!({
-                                    "width": image.width,
-                                    "height": image.height,
-                                    "format": "rgba",
-                                    "sha256": image_hash,
-                                }).to_string();
-
-                                let event = ClipboardEvent {
-                                    content_type: ClipboardContentType::Image.as_str().to_string(),
-                                    content: rgba_b64.clone(),
-                                    preview: format!("Image {}x{}", image.width, image.height),
-                                    metadata: Some(metadata),
-                                };
-
-                                emit_and_store(&app_handle, &event);
-                            }
-                            *last = image_key;
-                            got_content = true;
-                        }
-                    }
-                    Err(e) => {
-                        log::debug!("get_image failed: {}", e);
-                        if mode == "adaptive" {
-                            access_ok = false;
-                            remote_detected = true;
-                            log::warn!("Clipboard read denied; treating as remote session");
-                            continue;
-                        }
-                    }
-                }
-
                 match clipboard.get().html() {
                     Ok(html) => {
-                        access_ok = true;
                         let mut last = last_html.lock().unwrap();
                         if *last != html {
                             if !is_self_write(&self_writes, "html", &html) {
@@ -266,12 +223,41 @@ impl ClipboardManager {
                     }
                     Err(e) => {
                         log::debug!("get.html failed: {}", e);
-                        if mode == "adaptive" {
-                            access_ok = false;
-                            remote_detected = true;
-                            log::warn!("Clipboard HTML read denied; treating as remote session");
-                            continue;
+                    }
+                }
+
+                match clipboard.get_image() {
+                    Ok(image) => {
+                        let rgba_b64 = STANDARD.encode(&image.bytes);
+                        let mut hasher = Sha256::new();
+                        hasher.update(&image.bytes);
+                        let image_hash = format!("{:x}", hasher.finalize());
+                        let image_key = format!("{}x{}:{}", image.width, image.height, image_hash);
+                        let mut last = last_image.lock().unwrap();
+                        if *last != image_key {
+                            if !is_self_write(&self_writes, "image", &rgba_b64) {
+                                let metadata = serde_json::json!({
+                                    "width": image.width,
+                                    "height": image.height,
+                                    "format": "rgba",
+                                    "sha256": image_hash,
+                                }).to_string();
+
+                                let event = ClipboardEvent {
+                                    content_type: ClipboardContentType::Image.as_str().to_string(),
+                                    content: rgba_b64.clone(),
+                                    preview: format!("Image {}x{}", image.width, image.height),
+                                    metadata: Some(metadata),
+                                };
+
+                                emit_and_store(&app_handle, &event);
+                            }
+                            *last = image_key;
+                            got_content = true;
                         }
+                    }
+                    Err(e) => {
+                        log::debug!("get_image failed: {}", e);
                     }
                 }
 

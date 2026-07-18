@@ -98,22 +98,13 @@ fn simulate_ctrl_v() -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        use enigo::Keyboard;
-        use std::thread;
-
-        let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
-            .map_err(|e| format!("enigo init: {}", e))?;
-        enigo.key(enigo::Key::Meta, enigo::Direction::Press)
-            .map_err(|e| format!("failed key_down modifier: {}", e))?;
-        thread::sleep(Duration::from_millis(30));
-        let paste_result = enigo.raw(9, enigo::Direction::Click)
-            .map_err(|e| format!("failed key_down v: {}", e));
-        thread::sleep(Duration::from_millis(30));
-        let release_result = enigo.key(enigo::Key::Meta, enigo::Direction::Release)
-            .map_err(|e| format!("failed key_up modifier: {}", e));
-        paste_result?;
-        release_result?;
-        thread::sleep(Duration::from_millis(350));
+        use std::process::Command;
+        let script = r#"tell application "System Events" to keystroke "v" using command down"#;
+        Command::new("osascript")
+            .args(["-e", script])
+            .output()
+            .map_err(|e| format!("osascript failed: {}", e))?;
+        std::thread::sleep(Duration::from_millis(80));
     }
 
     Ok(())
@@ -158,18 +149,18 @@ fn activate_macos_app(app: &objc2_app_kit::NSRunningApplication) -> Result<(), S
     }
 
     if !app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows) {
-        thread::sleep(Duration::from_millis(80));
+        thread::sleep(Duration::from_millis(30));
         let _ = app.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
     }
 
-    for _ in 0..40 {
+    for _ in 0..15 {
         if app.isActive() {
             break;
         }
-        thread::sleep(Duration::from_millis(25));
+        thread::sleep(Duration::from_millis(20));
     }
 
-    thread::sleep(Duration::from_millis(120));
+    thread::sleep(Duration::from_millis(50));
     Ok(())
 }
 

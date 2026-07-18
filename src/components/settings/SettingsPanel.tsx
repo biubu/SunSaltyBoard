@@ -449,21 +449,6 @@ export function SettingsPanel({
           </Field>
         </Card>
 
-        {/* About */}
-        <Card
-          title="关于"
-          subtitle=""
-          iconName="about"
-          theme={theme}
-        >
-          <div className="fs-sm leading-relaxed" style={{ color: theme.settingsLabel }}>
-            SunSaltyBoard v{appVersion || "..."}
-          </div>
-          <div className="fs-sm leading-relaxed" style={{ color: theme.settingsHint }}>
-            简易剪贴板管理器
-          </div>
-        </Card>
-
         {/* Appearance */}
         <Card
           title="外观"
@@ -544,6 +529,21 @@ export function SettingsPanel({
               })}
             </div>
           </Field>
+        </Card>
+
+        {/* About */}
+        <Card
+          title="关于"
+          subtitle=""
+          iconName="about"
+          theme={theme}
+        >
+          <div className="fs-sm leading-relaxed" style={{ color: theme.settingsLabel }}>
+            SunSaltyBoard v{appVersion || "..."}
+          </div>
+          <div className="fs-sm leading-relaxed" style={{ color: theme.settingsHint }}>
+            A floating clipboard manager for Windows, macOS, and Linux.
+          </div>
         </Card>
       </div>
     </div>
